@@ -149,3 +149,17 @@ let return_values func =
         else
           None
   )
+
+let call_arity instr =
+  Llvm.num_operands instr - 1
+
+let call_callee instr =
+  instr |> call_arity |> Llvm.operand instr
+
+let call_params instr =
+  instr |> call_callee |> Llvm.params |> Array.to_list
+
+let call_args instr =
+  let arity = call_arity instr in
+  let indices = List.init arity (fun x -> x) in
+  List.map (Llvm.operand instr) indices

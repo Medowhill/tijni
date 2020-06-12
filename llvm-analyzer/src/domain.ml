@@ -57,8 +57,22 @@ module Location = struct
 
   let pp fmt = function
     | Null -> F.fprintf fmt "Null"
-    | Variable x -> Utils.string_of_exp x |> F.fprintf fmt "%s"
-    | Symbol x -> Utils.string_of_exp x |> F.fprintf fmt "\'%s"
+    | Variable x -> (
+        match Llvm.classify_value x with
+        | Llvm.ValueKind.Argument ->
+            let param = Utils.string_of_exp x in
+            let func = x |> Llvm.param_parent |> Llvm.value_name in
+            F.fprintf fmt "%s(%s)" param func
+        | _ ->
+            let var = Utils.string_of_exp x in
+            let func = x
+              |> Llvm.instr_parent |> Llvm.block_parent |> Llvm.value_name in
+            F.fprintf fmt "%s(%s)" var func
+    )
+    | Symbol x ->
+        let param = Utils.string_of_exp x in
+        let func = x |> Llvm.param_parent |> Llvm.value_name in
+        F.fprintf fmt "\'%s(%s)" param func
     | Alloca a -> F.fprintf fmt "Alloca(%a)" Label.pp a
     | Allocsite a -> F.fprintf fmt "Allocsite(%a)" Label.pp a
 end
@@ -98,16 +112,21 @@ module Value : VALUE = struct
   let filter = filter
 end
 
+module LocMap = Map.Make (Location)
+
 module type MEMORY_DOMAIN = sig
   include CPO
 
   val add : Location.t -> Value.t -> t -> t
   val weak_update : Location.t -> Value.t -> t -> t
   val find : Location.t -> t -> Value.t
+
+  val to_loc_map : t -> Value.t LocMap.t
+  val of_loc_map : Value.t LocMap.t -> t
 end
 
 module Memory : MEMORY_DOMAIN = struct
-  module M = Map.Make (Location)
+  module M = LocMap
 
   type t = Value.t M.t
 
@@ -130,39 +149,17 @@ module Memory : MEMORY_DOMAIN = struct
 
   let weak_update k v m = add k (Value.join (find k m) v) m
 
+  let to_loc_map m = m
+  let of_loc_map m = m
+
   let pp fmt m =
     M.iter (fun k v -> F.fprintf fmt "%a -> %a\n" Location.pp k Value.pp v) m
 end
 
 module Summary = struct
-  exception Not_found
-  exception Invalid
+  type t = Summary of (bool * bool) list * Value.t * Value.t LocMap.t
 
-  type rv =
-    | Null
-    | Param of int
-    | Alloc of Label.t
-
-  type t = Summary of (bool * bool) list * rv list
-
-  let make ps rv = Summary (ps, rv)
-
-  let make_rv v ps =
-    let rec index_of p l = match l with
-      | [] -> raise Not_found
-      | h :: t ->
-          if h = p then
-            0
-          else
-            1 + index_of p t in
-    Value.fold (
-      fun v lst -> (match v with
-        | Location.Null -> Null :: lst
-        | Location.Symbol p -> Param (index_of p ps) :: lst
-        | Location.Allocsite l -> Alloc l :: lst
-        | _ -> lst
-      )
-    ) v []
+  let make ps rv mem = Summary (ps, rv, Memory.to_loc_map mem)
 
   let show = function
     | true, true -> "used & freed"
@@ -170,15 +167,29 @@ module Summary = struct
     | false, true -> "freed"
     | false, false -> "-"
 
-  let rv_pp fmt = function
-    | Null -> F.fprintf fmt "Null"
-    | Param i -> F.fprintf fmt "%%%d" i
-    | Alloc l -> F.fprintf fmt "%a" Label.pp l
+  let mem_pp fmt m =
+    LocMap.iter (fun k v -> F.fprintf fmt "%a -> %a\n" Location.pp k Value.pp v) m
 
   let pp fmt = function
-    | Summary (ps, rv) ->
+    | Summary (ps, rv, mem) ->
       List.iteri (fun i p -> F.fprintf fmt "%d -> %s\n" i (show p)) ps;
-      F.fprintf fmt "{ ";
-      List.iter (F.fprintf fmt "%a, " rv_pp) rv;
-      F.fprintf fmt " }\n";
+      F.fprintf fmt "%a\n" Value.pp rv;
+      F.fprintf fmt "%a" mem_pp mem
+end
+
+module FunctionEnv = struct
+  module M = Map.Make (String)
+
+  type t = Summary.t M.t
+
+  let compare = compare
+
+  let empty = M.empty
+
+  let add = M.add
+
+  let find = M.find
+
+  let pp fmt m =
+    M.iter (fun k v -> F.fprintf fmt "[%s]\n%a\n" k Summary.pp v) m
 end

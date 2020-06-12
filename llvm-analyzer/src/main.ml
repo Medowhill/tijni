@@ -1,3 +1,4 @@
+module D = Domain
 module Analysis = Analysis.Make
 
 let usage = "Usage: analyzer [file]"
@@ -11,16 +12,21 @@ let main argv =
   let llctx = Llvm.create_context () in
   let llmem = Llvm.MemoryBuffer.of_file argv.(1) in
   let llm = Llvm_irreader.parse_ir llctx llmem in
-  Llvm.fold_left_functions (
-    fun _ f ->
-      if not (
-        Utils.is_llvm_function f ||
-        Llvm.value_name f = "malloc" ||
-        Llvm.value_name f = "free"
-      ) then (
-        let s = Analysis.analyze_function f in
-        Format.printf "%a\n" Domain.Summary.pp s
-      )
-  ) () llm
+  let fenv = Llvm.fold_left_functions (
+    fun fenv f ->
+      let name = Llvm.value_name f in
+      if
+        not (
+          Utils.is_llvm_function f ||
+          name = "malloc" ||
+          name = "free"
+        )
+      then
+        let summary = Analysis.analyze_function f fenv in
+        D.FunctionEnv.add name summary fenv
+      else
+        fenv
+  ) D.FunctionEnv.empty llm in
+  Format.printf "%a" D.FunctionEnv.pp fenv
 
 let _ = main Sys.argv
