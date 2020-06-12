@@ -1,0 +1,212 @@
+\documentclass[acmsmall,screen]{acmart}
+
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    \normalfont B\kern-0.5em{\scshape i\kern-0.25em b}\kern-0.8em\TeX}}}
+
+\bibliographystyle{ACM-Reference-Format}
+\citestyle{acmauthoryear}   %% For author/year citations
+
+\usepackage{mathtools}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{mathpartir}
+\usepackage{verbatim}
+\usepackage{hyperref}
+\usepackage{xspace}
+\usepackage{stmaryrd}
+\usepackage{multicol}
+\usepackage{listings}
+
+\lstdefinestyle{cstyle}{
+  frame=tb,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=fixed,
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{purple},
+  frame=single,
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3,
+  language=C,
+}
+\def\inline{\lstinline[style=javastyle]}
+
+\lstdefinestyle{javastyle}{
+  frame=tb,
+  aboveskip=3mm,
+  belowskip=3mm,
+  showstringspaces=false,
+  columns=fixed,
+  basicstyle={\small\ttfamily},
+  numbers=none,
+  numberstyle=\tiny\color{gray},
+  keywordstyle=\color{blue},
+  commentstyle=\color{dkgreen},
+  stringstyle=\color{purple},
+  frame=single,
+  breaklines=true,
+  breakatwhitespace=true,
+  tabsize=3,
+  language=Java,
+}
+\def\inline{\lstinline[style=javastyle]}
+
+\begin{document}
+
+\title{Detecting Memory Bugs in JNI Programs}
+\author{Jaemin Hong}
+\affiliation{
+  \institution{KAIST}
+}
+\maketitle
+
+\section{Background}
+
+The Java Native Interface (JNI) allows Java programs to call functions written
+in C or C++. Functions written in C or C++ are usually called native methods
+in JNI programming. The following is a code snippet from an example JNI program
+(some unimportant parts are omitted):
+
+\begin{lstlisting}[style=javastyle]
+class Hello {
+    native void hello();
+    public static void main(String[] args) { (new Hello()).hello(); }
+}
+\end{lstlisting}
+\vspace*{-1em}
+\begin{flushright}
+{\footnotesize\tt Hello.java}
+\end{flushright}
+\vspace*{-0.5em}
+\begin{lstlisting}[style=cstyle]
+JNIEXPORT void JNICALL Java_Hello_hello(JNIEnv *env) {
+    printf("Hello world!\n");
+}
+\end{lstlisting}
+\vspace*{-1em}
+\begin{flushright}
+{\footnotesize\tt Hello.c}
+\end{flushright}
+
+The {\tt hello} method of the {\tt Hello} class is defined as a native method.
+When the method is invoked, the Java Virtual Machine (JVM) calls the
+\verb!Java_Hello_hello! function, which is defined in the {\tt Hello.c} file.
+Therefore, the program prints \verb!"Hello world\n"! to the standard output.
+
+Programmers use the JNI to write compute-intensive parts of their programs or to
+reuse code written in C or C++ in Java programs without implementing the whole
+logic again. Lots of programs using the JNI exist in the real world. For
+example, the {\tt java.util.zip} package of the \citet{javautilzips}
+uses the JNI for high performance.
+
+One typical pattern to use the JNI is the peer pattern, which was introduced by
+\citet{liang1999java}. In this pattern, a pointer to a dynamically allocated
+memory block should be stored in a Java object. For instance, consider the
+following code (some unimportant parts are omitted):
+
+\begin{lstlisting}[style=javastyle]
+class Peer {
+    native long malloc(int size);
+    native void free(long ptr);
+    long ptr;
+    Peer(int size) { ptr = malloc(size); }
+    void destroy() { free(ptr); }
+}
+\end{lstlisting}
+\vspace*{-1em}
+\begin{flushright}
+{\footnotesize\tt Peer.java}
+\end{flushright}
+\vspace*{-0.5em}
+\begin{lstlisting}[style=cstyle]
+JNIEXPORT jlong JNICALL Java_Peer_malloc(JNIEnv *env, jint size) {
+    return (jlong) malloc(size);
+}
+JNIEXPORT void JNICALL Java_Peer_free(JNIEnv *env, jlong ptr) {
+    free((void *) ptr);
+}
+\end{lstlisting}
+\vspace*{-1em}
+\begin{flushright}
+{\footnotesize\tt Peer.c}
+\end{flushright}
+
+Since pointers are not Java values, they are represented as 64-bit integers in
+Java objects. Note that {\tt jlong} and {\tt jint} are types respectively denoting
+{\tt long} and {\tt int} of Java in native code. The pattern is useful to make
+Java wrapper classes of native structs and classes.
+
+\section{Motivation}
+
+The peer pattern can be the source of a memory bug in practice. If a pointer is
+used after being freed, then the JVM crashes immediately due to access to a
+dangling pointer. On the other hand, if a Java object carrying a pointer is
+garbage-collected before the pointer is freed, then the memory allocated by the
+native side will never be reclaimed. It is a memory leak.
+
+Although these kinds of memory bugs are common in C or C++ programming, I
+believe that they are more harmful in JNI programming than C or C++
+programming. The reasons follow:
+\begin{itemize}
+    \item Java programmers are unfamiliar with memory bugs since the JVM
+      manages memory in Java programs. Besides, they used to debug
+      their programs with logs provided by the JVM, but the JVM shows less useful
+      messages when it crashes while executing native code.
+    \item In many cases, programmers use existing native libraries for their
+      programs. They implement only a small portion of the native code,
+      which is required for interoperation. Thus, when they
+      find memory bugs, they need to inspect the native code that they did not
+      write.
+    \item Since memory allocation and deallocation happen in the native side,
+      programmers cannot easily determine whether invoking a certain Java method
+      will make memory blocks be allocated or deallocated.
+\end{itemize}
+
+Programmers have suffered from memory bugs while using the JNI. For instance,
+\citet{libgdx} is a Java game development framework using the JNI. Although the
+framework itself has been tested a lot, game developers have trouble with using
+the framework correctly. \citet{libgdxissue} claimed that he had experienced
+crashes in the issue tracker of the libGDX GitHub
+repository. However, the reason of the crashes was found in his code: {\tt
+dispose} was called twice, and it caused double-free, which made the JVM crash.
+Several similar issues are in the issue tracker.
+
+In this project, I will propose a novel static analyzer to detect memory bugs
+that can be found in the peer pattern.
+There has been multiple approaches to detect memory bugs in JNI programs
+~\cite{tan2006safe,kondoh2008finding,lee2010jinn,hong2017museum}. However, most
+of them aimed different sorts of memory bugs in the JNI or used dynamic
+analyses. To the best of my knowledge, there is no static analyzer
+detecting memory bugs due to pointers stored in Java objects.
+
+\section{My Approach}
+
+The most challenging part of the project is that the analyzer needs to deal
+with programs written in more than one language. It must analyze code written in
+Java and C (or C++). The analyzer will analyze native code first and then Java
+code. More precisely, the first part of the analyzer will extract the summaries of
+functions in native code. The summaries need to contain information about functions
+that allocate or deallocate memory. The second part of the
+analyzer will analyze Java code with the summaries. Due to the summaries, the
+analyzer can determine whether a particular Java method will allocate or
+deallocate memory. In this way, the analyzer will be able to detect memory bugs,
+including dangling pointers and memory leaks, in JNI programs.
+
+\section{Expected Results}
+
+I expect that the analyzer will be able to detect memory bugs in small JNI programs.
+However, to reduce false alarms, the anazlyer needs to use proper sensitivites.
+At the same time, to find memory bugs in large-scale JNI programs,
+which are typical cases in the real world, the analyzer needs to use proper
+advanced techniques, for example sparse analyses.
+
+\bibliography{ref}
+
+\end{document}

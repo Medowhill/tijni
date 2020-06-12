@@ -1,0 +1,17 @@
+*.sw[op]
+*.DS_Store
+
+.metals
+.bloop
+target
+
+*.aux
+*.log
+*.out
+
+*.class
+
+*.h
+*.ll
+*.o
+*.dylib
