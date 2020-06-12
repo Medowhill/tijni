@@ -62,11 +62,17 @@ module Make : S = struct
         Value.join (arg 0) (arg 1) |> update
     | Llvm.Opcode.ICmp -> update Value.bottom
     | Llvm.Opcode.Load ->
-        Value.bottom
-        |> Value.fold (
-          fun l v -> Value.join v (Memory.find l memory)
-        ) (arg 0)
-        |> update
+        let v, new_memory =
+          Value.fold (
+            fun l (v, m) ->
+              let v1 = Memory.find l m in
+              match v1, l with
+              | v, Location.Symbol _ when v = Value.bottom ->
+                  let v2 = l |> Location.of_symbol |> Value.of_location in
+                  (Value.join v v2, Memory.add l v2 m)
+              | _ -> (Value.join v v1, m)
+          ) (arg 0) (Value.bottom, memory) in
+        Memory.weak_update (Location.of_variable instr) v new_memory
     | Llvm.Opcode.Store ->
         let v = arg 0 in
         Value.fold (
@@ -83,7 +89,8 @@ module Make : S = struct
         List.combine (Utils.call_params instr) (Utils.call_args instr)
         |> List.fold_left (
             fun m (p, a) ->
-              LocMap.add (Location.of_symbol p) (eval a memory) m
+              let loc = Location.of_symbol (Location.of_variable p) in
+              LocMap.add loc (eval a memory) m
         ) LocMap.empty in
       let subst_value v =
         Value.fold (

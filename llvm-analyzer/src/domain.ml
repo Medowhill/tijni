@@ -37,7 +37,7 @@ module Location = struct
   type t =
     | Null
     | Variable of Llvm.llvalue
-    | Symbol of Llvm.llvalue
+    | Symbol of t
     | Alloca of Label.t
     | Allocsite of Label.t
 
@@ -55,7 +55,7 @@ module Location = struct
   let is_alloca = function Alloca _ -> true | _ -> false
   let is_allocsite = function Allocsite _ -> true | _ -> false
 
-  let pp fmt = function
+  let rec pp fmt = function
     | Null -> F.fprintf fmt "Null"
     | Variable x -> (
         match Llvm.classify_value x with
@@ -69,10 +69,7 @@ module Location = struct
               |> Llvm.instr_parent |> Llvm.block_parent |> Llvm.value_name in
             F.fprintf fmt "%s(%s)" var func
     )
-    | Symbol x ->
-        let param = Utils.string_of_exp x in
-        let func = x |> Llvm.param_parent |> Llvm.value_name in
-        F.fprintf fmt "\'%s(%s)" param func
+    | Symbol x -> F.fprintf fmt "\'%a" pp x
     | Alloca a -> F.fprintf fmt "Alloca(%a)" Label.pp a
     | Allocsite a -> F.fprintf fmt "Allocsite(%a)" Label.pp a
 end

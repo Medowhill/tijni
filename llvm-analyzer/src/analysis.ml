@@ -65,7 +65,10 @@ module Make : A = struct
       |> Llvm.params
       |> Array.to_list
       |> List.map (
-        fun p -> (p, p |> Location.of_symbol |> Value.of_location)
+        fun p -> (
+          p,
+          p |> Location.of_variable |> Location.of_symbol |> Value.of_location
+        )
       ) in
     let init_memory = List.fold_left (
       fun m (p, v) ->
