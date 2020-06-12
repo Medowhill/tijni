@@ -1,35 +1,26 @@
-module ValueWithSign = Domain.Value (Domain.Sign)
-module SignMemory = Domain.Memory (ValueWithSign)
-module SignAnalysis = Analysis.Make (SignMemory)
-module ValueWithInterval = Domain.Value (Domain.Interval)
-module IntervalMemory = Domain.Memory (ValueWithInterval)
-module IntervalAnalysis = Analysis.Make (IntervalMemory)
+module Analysis = Analysis.Make
 
-let usage = "Usage: analyzer [ sign | interval ] [ LLVM IR file ]"
+let usage = "Usage: analyzer [file]"
 
 let main argv =
-  if Array.length argv <> 3 then (
-    prerr_endline "analyzer: You must specify one analysis and one LLVM IR file";
+  if Array.length argv <> 2 then (
+    prerr_endline "analyzer: You must specify one LLVM IR file";
     prerr_endline usage;
-    exit 1 );
+    exit 1
+  );
   let llctx = Llvm.create_context () in
-  let llmem = Llvm.MemoryBuffer.of_file argv.(2) in
+  let llmem = Llvm.MemoryBuffer.of_file argv.(1) in
   let llm = Llvm_irreader.parse_ir llctx llmem in
-  let worklist = Domain.Worklist.init llm in
-  match argv.(1) with
-  | "sign" ->
-      (Domain.CallGraph.empty, SignAnalysis.initialize llm)
-      |> SignAnalysis.run llctx Analysis.Widen worklist
-      |> snd |> SignAnalysis.check llctx
-  | "interval" ->
-      (Domain.CallGraph.empty, IntervalAnalysis.initialize llm)
-      |> IntervalAnalysis.run llctx Analysis.Widen worklist
-      |> IntervalAnalysis.run llctx Analysis.Narrow worklist
-      |> snd
-      |> IntervalAnalysis.check llctx
-  | x ->
-      prerr_endline (x ^ " is not a valid analysis");
-      prerr_endline usage;
-      exit 1
+  Llvm.fold_left_functions (
+    fun _ f ->
+      if not (
+        Utils.is_llvm_function f ||
+        Llvm.value_name f = "malloc" ||
+        Llvm.value_name f = "free"
+      ) then (
+        let s = Analysis.analyze_function f in
+        Format.printf "%a\n" Domain.Summary.pp s
+      )
+  ) () llm
 
 let _ = main Sys.argv

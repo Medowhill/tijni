@@ -113,65 +113,39 @@ let is_llvm_function f =
   Str.string_match r1 (Llvm.value_name f) 0
   || Str.string_match r2 (Llvm.value_name f) 0
 
-let find_main llm =
-  match Llvm.lookup_function "main" llm with
-  | Some f -> f
-  | None -> failwith "main funtion not found"
-
-let is_input instr =
-  let callee_expr = Llvm.operand instr (Llvm.num_operands instr - 1) in
-  Llvm.value_name callee_expr = "input"
-
-let is_print_num instr =
-  let callee_expr = Llvm.operand instr (Llvm.num_operands instr - 1) in
-  Llvm.value_name callee_expr = "print_num"
-
-let is_print_ptr instr =
-  let callee_expr = Llvm.operand instr (Llvm.num_operands instr - 1) in
-  Llvm.value_name callee_expr = "print_ptr"
-
-let is_print_mem instr =
-  let callee_expr = Llvm.operand instr (Llvm.num_operands instr - 1) in
-  Llvm.value_name callee_expr = "print_mem"
-
 let is_malloc instr =
   let callee_expr = Llvm.operand instr (Llvm.num_operands instr - 1) in
   Llvm.value_name callee_expr = "malloc"
+
+let is_free instr =
+  let callee_expr = Llvm.operand instr (Llvm.num_operands instr - 1) in
+  Llvm.value_name callee_expr = "free"
 
 let is_llvm_intrinsic instr =
   let callee_expr = Llvm.operand instr (Llvm.num_operands instr - 1) in
   is_llvm_function callee_expr
 
-let neg_pred = function
-  | Llvm.Icmp.Eq -> Llvm.Icmp.Ne
-  | Llvm.Icmp.Ne -> Llvm.Icmp.Eq
-  | Llvm.Icmp.Slt -> Llvm.Icmp.Sge
-  | Llvm.Icmp.Ult -> Llvm.Icmp.Uge
-  | Llvm.Icmp.Sle -> Llvm.Icmp.Sgt
-  | Llvm.Icmp.Ule -> Llvm.Icmp.Ugt
-  | Llvm.Icmp.Sgt -> Llvm.Icmp.Sle
-  | Llvm.Icmp.Ugt -> Llvm.Icmp.Ule
-  | Llvm.Icmp.Sge -> Llvm.Icmp.Slt
-  | Llvm.Icmp.Uge -> Llvm.Icmp.Ult
+let instrs_of_block blk =
+  Llvm.fold_right_instrs (fun i l -> i :: l) blk []
 
-let rec get_first_nonphi instr =
-  let next = Llvm.instr_succ instr in
-  match next with
-  | Llvm.At_end _ -> raise Not_found
-  | Llvm.Before next_instr -> (
-      match Llvm.instr_opcode next_instr with
-      | Llvm.Opcode.PHI -> get_first_nonphi next_instr
-      | _ -> next )
+let instrs_of_function func =
+  Llvm.fold_right_blocks (
+    fun b l -> List.append (instrs_of_block b) l
+  ) func []
 
-let get_next_phi instr =
-  let next = Llvm.instr_succ instr in
-  match next with
-  | Llvm.At_end _ -> raise Not_found
-  | Llvm.Before next_instr -> (
-      match Llvm.instr_opcode next_instr with
-      | Llvm.Opcode.PHI -> next
-      | _ -> raise Not_found )
+let is_call instr =
+  Llvm.instr_opcode instr = Llvm.Opcode.Call
 
-let entry_point f = Llvm.entry_block f |> Llvm.instr_begin
+let is_return instr =
+  Llvm.instr_opcode instr = Llvm.Opcode.Ret
 
-let get_function instr = Llvm.instr_parent instr |> Llvm.block_parent
+let return_values func =
+  func
+  |> instrs_of_function
+  |> List.filter_map (
+      fun i ->
+        if is_return i && Llvm.num_operands i > 0 then
+          Some (Llvm.operand i 0)
+        else
+          None
+  )
