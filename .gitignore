@@ -15,3 +15,6 @@ target
 *.ll
 *.o
 *.dylib
+
+_build
+.merlin
