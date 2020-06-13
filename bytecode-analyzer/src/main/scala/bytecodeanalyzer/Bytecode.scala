@@ -85,6 +85,8 @@ object Lconst {
       Some(0)
     case in: InsnNode if in.getOpcode == Opcodes.LCONST_1 =>
       Some(1)
+    case in: LdcInsnNode if in.getOpcode == Opcodes.LDC =>
+      Some(in.cst.asInstanceOf[Long])
     case _ => None
   }
 }
@@ -115,6 +117,14 @@ object Ifeq {
   }
 }
 
+object Ifne {
+  def unapply(in: AbstractInsnNode): Option[LabelNode] = in match {
+    case in: JumpInsnNode if in.getOpcode == Opcodes.IFNE =>
+      Some(in.label)
+    case _ => None
+  }
+}
+
 object Goto {
   def unapply(in: AbstractInsnNode): Option[LabelNode] = in match {
     case in: JumpInsnNode if in.getOpcode == Opcodes.GOTO =>
@@ -126,6 +136,14 @@ object Goto {
 object Ladd {
   def unapply(in: AbstractInsnNode): Option[Unit] = in match {
     case in: InsnNode if in.getOpcode == Opcodes.LADD =>
+      Some(())
+    case _ => None
+  }
+}
+
+object Lsub {
+  def unapply(in: AbstractInsnNode): Option[Unit] = in match {
+    case in: InsnNode if in.getOpcode == Opcodes.LSUB =>
       Some(())
     case _ => None
   }

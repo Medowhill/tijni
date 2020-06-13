@@ -2,8 +2,7 @@ class Ex3 {
 
   public static void main(String[] args) {
     Ex3 obj = new Ex3();
-    long x = 1;
-    for (long i = 1; i != x + x + x + x + x + x; i++) {
+    for (long i = 1; i != 6; i++) {
       obj.set(i);
       System.out.println(obj.get());
     }
