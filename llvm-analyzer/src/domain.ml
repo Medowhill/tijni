@@ -109,7 +109,13 @@ module PowSet (Elt : SET) : POWSET_DOMAIN with type Elt.t = Elt.t = struct
   let join = union
 
   let pp fmt s =
-    iter (fun e -> F.fprintf fmt "%a," Elt.pp e) s;
+    match s |> to_seq |> List.of_seq with
+    | [] -> F.fprintf fmt "[]"
+    | h :: [] -> F.fprintf fmt "[ \"%a\" ]" Elt.pp h
+    | h :: t ->
+        F.fprintf fmt "[ \"%a\"" Elt.pp h;
+        List.iter (fun e -> F.fprintf fmt ", \"%a\"" Elt.pp e) t;
+        F.fprintf fmt " ]"
 end
 
 module Value : VALUE = struct
@@ -166,25 +172,44 @@ module Memory : MEMORY_DOMAIN = struct
 end
 
 module Summary = struct
-  type t = Summary of (bool * bool) list * Value.t * Value.t LocMap.t
+  type t =
+    | Summary of (Llvm.llvalue * (bool * bool)) list * Value.t * Value.t LocMap.t
 
   let make ps rv mem = Summary (ps, rv, Memory.to_loc_map mem)
 
-  let show = function
-    | true, true -> "uf"
-    | true, false -> "u"
-    | false, true -> "f"
-    | false, false -> ""
+  let show (x, (u, f)) =
+    let param = Utils.string_of_exp x in
+    let func = x |> Llvm.param_parent |> Llvm.value_name in
+    F.sprintf
+      "{ \"name\": \"%s(%s)\", \"used\": %b, \"freed\": %b }"
+      param func u f
 
   let mem_pp fmt m =
-    LocMap.iter (fun k v -> F.fprintf fmt "%a->%a\n" Location.pp k Value.pp v) m
+    match m |> LocMap.to_seq |> List.of_seq with
+    | [] -> F.fprintf fmt "{}";
+    | (k, v) :: [] -> F.fprintf fmt "{ \"%a\": %a }" Location.pp k Value.pp v
+    | (k, v) :: t ->
+        F.fprintf fmt "{\n      \"%a\": %a" Location.pp k Value.pp v;
+        List.iter (
+          fun (k, v) ->
+            F.fprintf fmt ",\n      \"%a\": %a" Location.pp k Value.pp v
+        ) t;
+        F.fprintf fmt "\n    }"
 
   let pp fmt = function
     | Summary (ps, rv, mem) ->
-      F.fprintf fmt "Param\n";
-      List.iter (fun p -> F.fprintf fmt "%s\n" (show p)) ps;
-      F.fprintf fmt "Return %a\n" Value.pp rv;
-      F.fprintf fmt "Memory\n%a" mem_pp mem
+      F.fprintf fmt "{\n    \"params\": ";
+      (
+        match ps with
+        | [] -> F.fprintf fmt "[]"
+        | h :: [] -> F.fprintf fmt "[ %s ]" (show h)
+        | h :: t ->
+            F.fprintf fmt "[ %s" (show h);
+            List.iter (fun p -> F.fprintf fmt ", %s" (show p)) t;
+            F.fprintf fmt " ]"
+      );
+      F.fprintf fmt ",\n    \"ret\": %a,\n" Value.pp rv;
+      F.fprintf fmt "    \"env\": %a\n  }" mem_pp mem
 end
 
 module FunctionEnv = struct
@@ -201,5 +226,14 @@ module FunctionEnv = struct
   let find = M.find
 
   let pp fmt m =
-    M.iter (fun k v -> F.fprintf fmt "Function %s\n%a" k Summary.pp v) m
+    match m |> M.to_seq |> List.of_seq with
+    | [] -> F.fprintf fmt "{}";
+    | (k, v) :: [] -> F.fprintf fmt "{\n  \"%s\": %a\n}" k Summary.pp v
+    | (k, v) :: t ->
+        F.fprintf fmt "{\n  \"%s\": %a" k Summary.pp v;
+        List.iter (
+          fun (k, v) ->
+            F.fprintf fmt ",\n  \"%s\": %a" k Summary.pp v
+        ) t;
+        F.fprintf fmt "\n}"
 end

@@ -32,6 +32,8 @@ module Make : A = struct
     |> List.split
     |> snd
     |> List.split
+    |> snd
+    |> List.split
 
   let is_used_in v mem fenv instr =
     let arg ind = Semantics.eval (Llvm.operand instr ind) mem in
@@ -79,10 +81,12 @@ module Make : A = struct
         List.fold_left Memory.join m (Semantics.transfer_instrs instrs m fenv)
     ) init_memory in
     let ps = List.map (
-      fun (_, v) ->
+      fun (p, v) ->
         (
-          List.exists (is_used_in v memory fenv) instrs,
-          List.exists (is_freed_in v memory fenv) instrs
+          p, (
+            List.exists (is_used_in v memory fenv) instrs,
+            List.exists (is_freed_in v memory fenv) instrs
+          )
         )
     ) param in
     let rv =

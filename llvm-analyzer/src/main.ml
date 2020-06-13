@@ -2,7 +2,8 @@ module D = Domain
 module Analysis = Analysis.Make
 
 let main argv =
-  if Array.length argv <> 3 then (
+  if not (Array.length argv = 2 || Array.length argv = 3) then (
+    prerr_endline "Usage: analyzer [input file]";
     prerr_endline "Usage: analyzer [input file] [output file]";
     exit 1
   );
@@ -24,9 +25,12 @@ let main argv =
       else
         fenv
   ) D.FunctionEnv.empty llm in
-  let oc = open_out argv.(2) in
-  Format.set_formatter_out_channel oc;
-  Format.printf "%a" D.FunctionEnv.pp fenv;
-  close_out oc
+  if Array.length argv = 2 then
+    Format.printf "%a" D.FunctionEnv.pp fenv
+  else
+    let oc = open_out argv.(2) in
+    Format.set_formatter_out_channel oc;
+    Format.printf "%a" D.FunctionEnv.pp fenv;
+    close_out oc
 
 let _ = main Sys.argv
