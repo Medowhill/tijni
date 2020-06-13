@@ -43,7 +43,7 @@ object SimpleNumDomain extends NumDomain {
       case _ => false
     }
     def |(that: Elem): Elem = (this, that) match {
-      case (Top, _) | (Top, _) => Top
+      case (Top, _) | (_, Top) => Top
       case _ => Bottom
     }
     def +(that: Elem): Elem = (this, that) match {
@@ -67,7 +67,53 @@ object SimpleNumDomain extends NumDomain {
   def ofNum(l: Long) = Top
 }
 
-case class Loc(method: String, pc: Int)
+object SetNumDomain extends NumDomain {
+  val maxSize = 10
+  sealed trait Elem extends NElemImpl {
+    def <=(that: Elem): Boolean = (this, that) match {
+      case (_, Top) => true
+      case (Top, _) => false
+      case (SetOf(s1), SetOf(s2)) => s1 subsetOf s2
+    }
+    def |(that: Elem): Elem = (this, that) match {
+      case (Top, _) | (_, Top) => Top
+      case (SetOf(s1), SetOf(s2)) =>
+        val s = s1 | s2
+        if (s.size > maxSize) Top else SetOf(s)
+    }
+    def +(that: Elem): Elem = (this, that) match {
+      case (Top, _) | (_, Top) => Top
+      case (SetOf(s1), SetOf(s2)) =>
+        val s = for (l1 <- s1; l2 <- s2) yield l1 + l2
+        if (s.size > maxSize) Top else SetOf(s)
+    }
+    def -(that: Elem): Elem = (this, that) match {
+      case (Top, _) | (_, Top) => Top
+      case (SetOf(s1), SetOf(s2)) =>
+        val s = for (l1 <- s1; l2 <- s2) yield l1 - l2
+        if (s.size > maxSize) Top else SetOf(s)
+    }
+    def cmp(that: Elem): Elem = (this, that) match {
+      case (Top, _) | (_, Top) => Top
+      case (SetOf(s1), SetOf(s2)) =>
+        val s =
+          for (l1 <- s1; l2 <- s2)
+            yield if (l1 > l2) 1L else if (l1 == l2) 0L else -1L
+        if (s.size > maxSize) Top else SetOf(s)
+    }
+  }
+  case object Top extends Elem
+  case class SetOf(s: Set[Long]) extends Elem
+
+  val top = Top
+  val bottom = SetOf(Set())
+  def ofNum(l: Long) = SetOf(Set(l))
+}
+
+case class Loc(method: String, pc: Int) {
+  override def toString: String = s"$method:$pc"
+  def next: Loc = Loc(method, pc + 1)
+}
 
 trait LocDomain extends Domain {
   type Elem <: LElemImpl
@@ -77,6 +123,7 @@ trait LocDomain extends Domain {
   }
 
   def ofLoc(l: Loc): Elem
+  def ofLocs(l: IterableOnce[Loc]): Elem
 }
 
 object SetLocDomain extends LocDomain {
@@ -88,6 +135,7 @@ object SetLocDomain extends LocDomain {
 
   val bottom: Elem = Elem(Set())
   def ofLoc(l: Loc): Elem = Elem(Set(l))
+  def ofLocs(l: IterableOnce[Loc]): Elem = Elem(l.iterator.toSet)
 }
 
 trait ValDomain extends Domain {
@@ -257,6 +305,8 @@ abstract class StackDomain[VD <: ValDomain with Singleton](
     def popN(n: Int): Elem
     def push(v: VD.Elem): Elem
   }
+
+  def weakBottom: Elem
 }
 
 case class ListStackDomain[VD <: ValDomain with Singleton](
@@ -283,8 +333,12 @@ case class ListStackDomain[VD <: ValDomain with Singleton](
     }
   }
   case class L(l: List[VD.Elem]) extends Elem {
-    def topN(n: Int): List[VD.Elem] = l.take(n)
-    def popN(n: Int): Elem = L(l.drop(n))
+    def topN(n: Int): List[VD.Elem] =
+      if (n <= l.length) l.take(n)
+      else List.fill(n)(VD.bottom)
+    def popN(n: Int): Elem =
+      if (n <= l.length) L(l.take(n))
+      else bottom
     def push(v: VD.Elem): Elem = L(v :: l)
   }
   case class WL(v: VD.Elem) extends Elem {
@@ -294,6 +348,7 @@ case class ListStackDomain[VD <: ValDomain with Singleton](
   }
 
   val bottom: Elem = L(Nil)
+  val weakBottom: Elem = WL(VD.bottom)
 }
 
 abstract class CtxDomain[
@@ -323,7 +378,7 @@ abstract class CtxDomain[
     def stackTopN(m: String, n: Int): List[VD.Elem]
     def stackPop(m: String): Elem = stackPopN(m, 1)
     def stackPopN(m: String, n: Int): Elem
-    def stackPush(m: String, v: VD.Elem): Elem
+    def stackPush(m: String, v: VD.Elem, recursives: Set[String]): Elem
   }
 }
 
@@ -344,28 +399,24 @@ case class StdCtxDomain[
   ) extends CElemImpl {
     def <=(that: Elem): Boolean = (this, that) match {
       case (Elem(m1, h1, s1), Elem(m2, h2, s2)) =>
-        m1.forall{
-          case (m, mem) => mem <= m2.getOrElse(m, MD.bottom)
-        } &&
+        m1.forall{ case (m, mem) => mem <= m2.getOrElse(m, MD.bottom) } &&
         h1 <= h2 &&
-        s1.forall{
-          case (m, stk) => stk <= s2.getOrElse(m, SD.bottom)
-        }
+        s1.forall{ case (m, stk) => stk <= s2.getOrElse(m, SD.bottom) }
     }
     def |(that: Elem): Elem = (this, that) match {
       case (Elem(m1, h1, s1), Elem(m2, h2, s2)) => Elem(
         (m1.keys ++ m2.keys).map{
-          case m => m -> (m1.getOrElse(m, MD.bottom) | m2.getOrElse(m, MD.bottom))
+          case m => m -> List(m1, m2).flatMap(_.get(m)).reduce(_ | _)
         }.toMap,
         h1 | h2,
         (s1.keys ++ s2.keys).map{
-          case m => m -> (s1.getOrElse(m, SD.bottom) | s2.getOrElse(m, SD.bottom))
+          case m => m -> List(s1, s2).flatMap(_.get(m)).reduce(_ | _)
         }.toMap
       )
     }
 
     def memGet(m: String, i: Int): VD.Elem =
-      mems.get(m).map(_.get(i)).getOrElse(VD.bottom)
+      mems.getOrElse(m, MD.bottom).get(i)
     def memStrongUpdate(m: String, i: Int, v: VD.Elem): Elem = {
       val mem = mems.getOrElse(m, MD.bottom).strongUpdate(i, v)
       copy(mems = mems + (m -> mem))
@@ -380,14 +431,30 @@ case class StdCtxDomain[
       copy(heap = heap.weakUpdate(l, v))
 
     def stackTopN(m: String, n: Int): List[VD.Elem] =
-      stacks.get(m).map(_.topN(n)).getOrElse(List.fill(n)(VD.bottom))
+      stacks(m).topN(n)
     def stackPopN(m: String, n: Int): Elem = {
-      val stack = stacks.getOrElse(m, SD.bottom).popN(n)
+      val stack = stacks(m).popN(n)
       copy(stacks = stacks + (m -> stack))
     }
-    def stackPush(m: String, v: VD.Elem): Elem = {
-      val stack = stacks.getOrElse(m, SD.bottom).push(v)
+    def stackPush(m: String, v: VD.Elem, recursives: Set[String]): Elem = {
+      val stack =
+        if (stacks contains m)
+          stacks(m).push(v)
+        else if (recursives(m))
+          SD.weakBottom.push(v)
+        else
+          SD.bottom.push(v)
       copy(stacks = stacks + (m -> stack))
+    }
+
+    override def toString: String = {
+      val m = mems.toList.sortBy(_._1)
+        .map{ case (n, m) => s"  $n: $m" }
+        .mkString("\n")
+      val s = stacks.toList.sortBy(_._1)
+        .map{ case (n, s) => s"  $n: $s" }
+        .mkString("\n")
+      s"[Memory]\n$m\n[Heap]\n$heap\n[Stack]\n$s"
     }
   }
 

@@ -11,21 +11,17 @@ object Interpreter {
       Map(),
       pg
     )
-    // println(ctx)
-    while (!ctx.terminated) {
-      ctx = step(ctx)
-      // println(ctx)
-    }
+    while (!ctx.terminated) ctx = step(ctx)
   }
 
   def step(ctx: Ctx): Ctx = {
     val nctx = ctx.instruction match {
       case Label(_) => ctx
+      case Getstatic(_) => ctx
 
       case Load(i) => ctx.load(i)
       case Store(i) => ctx.store(i)
 
-      case Getstatic(_) => ctx.getSysout
       case Getfield(f) => ctx.get(f)
       case Putfield(f) => ctx.put(f)
 
@@ -55,14 +51,12 @@ object Interpreter {
     override lazy val toString: String = this match {
       case NumV(l) => l.toString
       case ObjV(a) => s"@$a"
-      case Sysout => s"sys.out"
       case Undef => "undef"
     }
   }
   case class NumV(value: Long) extends Value
   case class ObjV(addr: Addr) extends Value
   case object Undef extends Value
-  case object Sysout extends Value
 
   type Addr = Int
   type Heap = Map[Addr, Map[String, Value]]
@@ -157,8 +151,6 @@ object Interpreter {
       copy(callStack = head.store(i) :: tail)
     def get(f: String): Ctx =
       copy(callStack = head.get(f, heap) :: tail)
-    def getSysout: Ctx =
-      copy(callStack = head.push(Sysout) :: tail)
     def put(f: String): Ctx = {
       val (nhead, nheap) = head.put(f, heap)
       copy(callStack = nhead :: tail, heap = nheap)
@@ -174,22 +166,23 @@ object Interpreter {
       val obj = program.fields.map(f => f -> NumV(0)).toMap
       copy(callStack = head.push(ObjV(a)) :: tail, heap = heap + (a -> obj))
     }
-    def invoke(m: String, d: String): Ctx = {
-      val argNum = d.indexOf(")") - d.indexOf("(") - 1
-      val (rargs, nhead) = head.popN(argNum + 1)
-      val args = rargs.reverse
-      if (args.head == Sysout) {
-        println(args(1))
+    def invoke(m: String, d: String): Ctx =
+      if (m == "println") {
+        val (List(v), nhead) = head.popN(1)
+        println(v)
         copy(callStack = nhead :: tail)
       } else {
+        val argNum = d.indexOf(")") - d.indexOf("(") - 1
+        val (rargs, nhead) = head.popN(argNum + 1)
+        val args = rargs.reverse
         val (varNum, instrs) = program.methods(m)
-        val vars = (0 until varNum).map(
-          i => if (i < args.length) args(i) else Undef
-        ).toVector
+        val vars =
+          args.tail.zipWithIndex.foldLeft(Vector.fill(varNum)(Undef: Value)){
+            case (vars, (a, i)) => vars.updated(2 * i + 1, a)
+          }.updated(0, args.head)
         val nf = Frame(vars, Nil, -1, instrs)
         copy(callStack = nf :: nhead :: tail)
       }
-    }
     def ret: Ctx = copy(callStack = tail)
     def lret: Ctx = {
       val nhead :: tail2 = tail

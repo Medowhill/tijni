@@ -18,7 +18,10 @@ class Program(
     val f = fields.mkString(", ")
     val m = methods.map{
       case (n, (_, is)) =>
-        s"$n\n${is.map(i => s"  ${Program.insnToString(i)}").mkString("\n")}"
+        val i = is.zipWithIndex.map{
+          case (i, ind) => s"  $ind: ${Program.insnToString(i)}"
+        }.mkString("\n")
+        s"$n\n$i"
     }.mkString("\n\n")
     val n = natives.mkString(", ")
     s"[Fields]\n$f\n\n[Methods]\n$m\n\n[Natives]\n$n"
@@ -47,7 +50,7 @@ object Program {
         val argNum = desc.indexOf(")") - desc.indexOf("(") - 1
         mn.name -> ((maxIndex max argNum, instrs))
       }
-    ).partition(_._2._2.nonEmpty)
+    ).filter(_._1 != "<init>").partition(_._2._2.nonEmpty)
     in.close()
     new Program(fields, methods.toMap, natives.map(_._1).toList)
   }

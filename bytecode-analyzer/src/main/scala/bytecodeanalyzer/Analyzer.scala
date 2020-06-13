@@ -2,209 +2,246 @@ package info.hjaem.bytecodeanalyzer
 
 import org.objectweb.asm.tree._
 
-object Analyzer {
+class Analyzer(program: Program) {
 
-  def run(pg: Program): Unit = {
-    val (varNum, instrs) = pg.mainMethod
-    var ctx = Ctx(
-      Frame(Vector.fill(varNum)(Undef), Nil, 0, instrs) :: Nil,
-      Map(),
-      pg
-    )
-    // println(ctx)
-    while (!ctx.terminated) {
-      ctx = step(ctx)
-      // println(ctx)
+  val ND = SetNumDomain
+  val LD = SetLocDomain
+  val VD = ProdValDomain(ND, LD)
+  object MDM extends Make[MemDomain, VD.type] {
+    def apply(vd: VD.type): MemDomain[VD.type] = MapMemDomain(vd)
+  }
+  object ODM extends Make[ObjDomain, VD.type] {
+    def apply(vd: VD.type): ObjDomain[VD.type] = MapObjDomain(vd)
+  }
+  object HDM extends Make2[HeapDomain, LD.type, VD.type] {
+    def apply(ld: LD.type, vd: VD.type): HeapDomain[LD.type, VD.type] =
+      MapHeapDomain(ld, vd, ODM)
+  }
+  object SDM extends Make[StackDomain, VD.type] {
+    def apply(vd: VD.type): StackDomain[VD.type] = ListStackDomain(vd)
+  }
+  val CD: CtxDomain[VD.type, LD.type] = StdCtxDomain(VD, LD, MDM, HDM, SDM)
+
+  type AbsCtx = CD.Elem
+
+  def run(): Unit = {
+    val entry = Loc("main", 1)
+    val wl = Set(entry)
+    val table = Map(entry -> CD.bottom)
+    val res = iter(wl, table)
+    // res.toList.sortBy{ case (Loc(m, i), _) => (m, i) } foreach {
+    //   case (l, t) => println(l); println(t); println()
+    // }
+    for ((Loc(m, i), ctx) <- res) {
+      program.methods(m)._2(i) match {
+        case Invokevirtual("println", _) =>
+          println(s"$m:$i ${ctx.stackTop(m)}")
+        case _ =>
+      }
     }
   }
 
-  def step(ctx: Ctx): Ctx = {
-    val nctx = ctx.instruction match {
-      case Label(_) => ctx
+  @scala.annotation.tailrec
+  final def iter(worklist: Set[Loc], table: Map[Loc, AbsCtx]): Map[Loc, AbsCtx] =
+    if (worklist.isEmpty)
+      table
+    else {
+      val res = worklist.flatMap(l => step(l, table(l)))
+      val ntable = res.toList.groupBy(_._1).map{
+        case (loc, ctxs) =>
+          loc -> ctxs.map(_._2).reduce(_ | _)
+      }
+      val wl = ntable.filter{
+        case (loc, ctx) => !(table.contains(loc) && ctx <= table(loc))
+      }.map(_._1).toSet
+      val merged = (table.keys ++ ntable.keys).map(
+        loc =>
+          loc -> List(table, ntable).flatMap(_.get(loc)).reduce(_ | _)
+      ).toMap
+      iter(wl, merged)
+    }
 
-      case Load(i) => ctx.load(i)
-      case Store(i) => ctx.store(i)
+  def step(loc: Loc, ctx: AbsCtx): Set[(Loc, AbsCtx)] = {
+    // println(loc)
+    val method = loc.method
+    program.methods(method)._2(loc.pc) match {
+      case Label(_) | Getstatic(_) | Return(_) | Goto(_) =>
+        nexts(loc).map(_ -> ctx)
 
-      case Getstatic(_) => ctx.getSysout
-      case Getfield(f) => ctx.get(f)
-      case Putfield(f) => ctx.put(f)
+      case Load(i) =>
+        val v = ctx.memGet(method, i)
+        Set(loc.next -> ctx.stackPush(method, v, recursives))
 
-      case Invokevirtual(m, d) => ctx.invoke(m, d)
-      case Return(_) => ctx.ret
-      case Lreturn(_) => ctx.lret
+      case Store(i) =>
+        val v = ctx.stackTop(method)
+        val ctx1 = ctx.stackPop(method)
+        if (recursives(method))
+          Set(loc.next -> ctx1.memWeakUpdate(method, i, v))
+        else
+          Set(loc.next -> ctx1.memStrongUpdate(method, i, v))
 
-      case New(_) => ctx.newObj.next.next
-      case Lconst(l) => ctx.const(l)
-      case Pop(_) => ctx.pop
+      case Getfield(f) =>
+        val a = ctx.stackTop(method)
+        val ctx1 = ctx.stackPop(method)
+        val obj = ctx.heapGet(LD.ofLocs(a.toLocs))
+        val v = obj.get(f)
+        Set(loc.next -> ctx1.stackPush(method, v, recursives))
 
-      case Ladd(_) => ctx.add
-      case Lsub(_) => ctx.sub
-      case Lcmp(_) => ctx.cmp
+      case Putfield(f) =>
+        val v = ctx.stackTop(method)
+        val ctx1 = ctx.stackPop(method)
+        val a = ctx1.stackTop(method)
+        val ctx2 = ctx1.stackPop(method)
+        val l = LD.ofLocs(a.toLocs)
+        val obj = ctx.heapGet(l)
+        val obj1 = obj.weakUpdate(f, v)
+        Set(loc.next -> ctx2.heapWeakUpdate(l, obj1))
 
-      case Ifeq(l) => ctx.ifeq(l)
-      case Ifne(l) => ctx.ifne(l)
-      case Goto(l) => ctx.go(l)
+      case Invokevirtual("println", d) =>
+        Set(loc.next -> ctx.stackPop(method))
+
+      case Invokevirtual(m, d) =>
+        val argNum = d.indexOf(")") - d.indexOf("(") - 1
+        val obj :: args = ctx.stackTopN(method, argNum + 1).reverse
+        val ctx1 = ctx.stackPopN(method, argNum + 1)
+        val nctx =
+          if (recursives(m)) {
+            val ctx2 = ctx1.memWeakUpdate(m, 0, obj)
+            args.zipWithIndex.foldLeft(ctx2){
+              case (c, (a, i)) => c.memWeakUpdate(m, 2 * i + 1, a)
+            }
+          } else {
+            val ctx2 = ctx1.memStrongUpdate(m, 0, obj)
+            args.zipWithIndex.foldLeft(ctx2){
+              case (c, (a, i)) => c.memStrongUpdate(m, 2 * i + 1, a)
+            }
+          }
+          Set(Loc(m, 0) -> nctx)
+
+      case Lreturn(_) =>
+        val v = ctx.stackTop(method)
+        val ctx1 = ctx.stackPop(method)
+        nexts(loc).map(
+          l => {
+            val Loc(m, _) = l
+            l -> ctx1.stackPush(m, v, recursives)
+          }
+        )
+
+      case Ifeq(_) | Ifne(_) =>
+        nexts(loc).map(_ -> ctx.stackPop(method))
+
+      case New(_) =>
+        val obj = CD.HD.OD.init(program.fields)
+        val ctx1 = ctx.heapWeakUpdate(LD.ofLoc(loc), obj)
+        val ctx2 = ctx1.stackPush(method, VD.ofLoc(loc), recursives)
+        Set(loc.next.next.next -> ctx2)
+
+      case Lconst(l) =>
+        val v = VD.ofNum(l)
+        Set(loc.next -> ctx.stackPush(method, v, recursives))
+
+      case Pop(_) =>
+        Set(loc.next -> ctx.stackPop(method))
+
+      case Ladd(_) =>
+        val v2 = ctx.stackTop(method)
+        val ctx1 = ctx.stackPop(method)
+        val v1 = ctx1.stackTop(method)
+        val ctx2 = ctx1.stackPop(method)
+        Set(loc.next -> ctx2.stackPush(method, v1 + v2, recursives))
+
+      case Lsub(_) =>
+        val v2 = ctx.stackTop(method)
+        val ctx1 = ctx.stackPop(method)
+        val v1 = ctx1.stackTop(method)
+        val ctx2 = ctx1.stackPop(method)
+        Set(loc.next -> ctx2.stackPush(method, v1 - v2, recursives))
+
+      case Lcmp(_) =>
+        val v2 = ctx.stackTop(method)
+        val ctx1 = ctx.stackPop(method)
+        val v1 = ctx1.stackTop(method)
+        val ctx2 = ctx1.stackPop(method)
+        Set(loc.next -> ctx2.stackPush(method, v1 cmp v2, recursives))
 
       case in =>
         sys.error(s"Unknown opcode (${Program.insnToString(in)})")
     }
-    if (nctx.terminated) nctx else nctx.next
   }
 
-  sealed trait Value {
-    override lazy val toString: String = this match {
-      case NumV(l) => l.toString
-      case ObjV(a) => s"@$a"
-      case Sysout => s"sys.out"
-      case Undef => "undef"
+  val callgraph: Map[String, Set[String]] =
+    program.methods.map{
+      case (caller, (_, is)) =>
+        caller -> is.flatMap{
+          case Invokevirtual(callee, _) => Some(callee)
+          case _ => None
+        }.toSet
     }
-  }
-  case class NumV(value: Long) extends Value
-  case class ObjV(addr: Addr) extends Value
-  case object Undef extends Value
-  case object Sysout extends Value
 
-  type Addr = Int
-  type Heap = Map[Addr, Map[String, Value]]
-
-  case class Frame(
-    variables: Vector[Value],
-    stack: List[Value],
-    pc: Int,
-    instructions: Vector[AbstractInsnNode],
-  ) {
-    lazy val head: Value = stack.head
-    lazy val tail: List[Value] = stack.tail
-    def instruction: AbstractInsnNode = instructions(pc)
-    def next: Frame = copy(pc = pc + 1)
-    def load(i: Int): Frame = copy(stack = variables(i) :: stack)
-    def store(i: Int): Frame =
-      copy(variables = variables.updated(i, head), stack = tail)
-    def get(f: String, heap: Heap): Frame = {
-      val ObjV(a) = head
-      copy(stack = heap(a)(f) :: tail)
+  val transitiveClosure: Map[String, Set[String]] = {
+    def fix[T](f: T => T, x: T): T = {
+      val fx = f(x)
+      if (fx == x) fx else fix(f, fx)
     }
-    def put(f: String, heap: Heap): (Frame, Heap) = {
-      val ObjV(a) :: tail2 = tail
-      val nheap = heap + (a -> (heap(a) + (f -> head)))
-      (copy(stack = tail2), nheap)
-    }
-    def cmp: Frame = {
-      val NumV(v1) = head
-      val NumV(v0) :: tail2 = tail
-      val v = NumV(
-        if (v0 > v1) 1
-        else if (v0 == v1) 0
-        else -1
-      )
-      copy(stack = v :: tail2)
-    }
-    def ifeq(l: LabelNode): Frame = {
-      val NumV(v) = head
-      if (v == 0)
-        copy(stack = tail, pc = instructions.indexOf(l) - 1)
-      else
-        copy(stack = tail)
-    }
-    def ifne(l: LabelNode): Frame = {
-      val NumV(v) = head
-      if (v != 0)
-        copy(stack = tail, pc = instructions.indexOf(l) - 1)
-      else
-        copy(stack = tail)
-    }
-    def go(l: LabelNode): Frame =
-      copy(pc = instructions.indexOf(l) - 1)
-    def add: Frame = {
-      val NumV(v1) = head
-      val NumV(v0) :: tail2 = tail
-      copy(stack = NumV(v0 + v1) :: tail2)
-    }
-    def sub: Frame = {
-      val NumV(v1) = head
-      val NumV(v0) :: tail2 = tail
-      copy(stack = NumV(v0 - v1) :: tail2)
-    }
-    def push(v: Value): Frame = copy(stack = v :: stack)
-    def pop: Frame = copy(stack = tail)
-    def popN(n: Int): (List[Value], Frame) =
-      (stack.take(n), copy(stack = stack.drop(n)))
-
-    override lazy val toString: String = {
-      val v = variables.mkString(", ")
-      val s = stack.mkString(", ")
-      val i = instructions.zipWithIndex.map{
-        case (i, ind) => s"${ind}: ${Program.insnToString(i)}"
-      }.mkString("\n")
-      s"[Variables]\n$v\n\n[Stack]\n$s\n\nPC=$pc\n\n[Instructions]\n$i"
-    }
-  }
-
-  case class Ctx(
-    callStack: List[Frame],
-    heap: Heap,
-    program: Program,
-  ) {
-    lazy val head: Frame = callStack.head
-    lazy val tail: List[Frame] = callStack.tail
-    def terminated: Boolean = callStack.isEmpty
-    def instruction: AbstractInsnNode = head.instruction
-    def next: Ctx =
-      copy(callStack = head.next :: tail)
-    def load(i: Int): Ctx =
-      copy(callStack = head.load(i) :: tail)
-    def store(i: Int): Ctx =
-      copy(callStack = head.store(i) :: tail)
-    def get(f: String): Ctx =
-      copy(callStack = head.get(f, heap) :: tail)
-    def getSysout: Ctx =
-      copy(callStack = head.push(Sysout) :: tail)
-    def put(f: String): Ctx = {
-      val (nhead, nheap) = head.put(f, heap)
-      copy(callStack = nhead :: tail, heap = nheap)
-    }
-    def cmp: Ctx = copy(callStack = head.cmp :: tail)
-    def ifeq(l: LabelNode): Ctx = copy(callStack = head.ifeq(l) :: tail)
-    def ifne(l: LabelNode): Ctx = copy(callStack = head.ifne(l) :: tail)
-    def go(l: LabelNode): Ctx = copy(callStack = head.go(l) :: tail)
-    def add: Ctx = copy(callStack = head.add :: tail)
-    def sub: Ctx = copy(callStack = head.sub :: tail)
-    def newObj: Ctx = {
-      val a = heap.keys.maxOption.getOrElse(0) + 1
-      val obj = program.fields.map(f => f -> NumV(0)).toMap
-      copy(callStack = head.push(ObjV(a)) :: tail, heap = heap + (a -> obj))
-    }
-    def invoke(m: String, d: String): Ctx = {
-      val argNum = d.indexOf(")") - d.indexOf("(") - 1
-      val (rargs, nhead) = head.popN(argNum + 1)
-      val args = rargs.reverse
-      if (args.head == Sysout) {
-        println(args(1))
-        copy(callStack = nhead :: tail)
-      } else {
-        val (varNum, instrs) = program.methods(m)
-        val vars = (0 until varNum).map(
-          i => if (i < args.length) args(i) else Undef
-        ).toVector
-        val nf = Frame(vars, Nil, -1, instrs)
-        copy(callStack = nf :: nhead :: tail)
+    def aux(m: Map[String, Set[String]]): Map[String, Set[String]] = {
+      m.map{
+        case (caller, callees) =>
+          caller -> (callees ++ callees.flatMap(m.get).flatten)
       }
     }
-    def ret: Ctx = copy(callStack = tail)
-    def lret: Ctx = {
-      val nhead :: tail2 = tail
-      copy(callStack = nhead.push(head.head) :: tail2)
-    }
-    def const(l: Long): Ctx =
-      copy(callStack = head.push(NumV(l)) :: tail)
-    def pop: Ctx = copy(callStack = head.pop :: tail)
-
-    override lazy val toString: String = {
-      val c = callStack.zipWithIndex.map{
-        case (f, i) => s"\n[[Frame $i]]\n$f\n"
-      }.mkString("\n\n")
-      s"===CTX===$c\n\n$heap\n===END==="
-    }
+    fix(aux, callgraph)
   }
 
+  val recursives: Set[String] =
+    program.methods.keySet.filter(
+      m => transitiveClosure(m) contains m
+    )
+
+  val callSites: Map[String, Set[Loc]] =
+    program.methods.toList.flatMap{
+      case (caller, (_, is)) =>
+        is.zipWithIndex.flatMap{
+          case (Invokevirtual(callee, _), i) =>
+            Some((callee, Loc(caller, i)))
+          case _ => None
+        }
+    }.groupBy(_._1).map{
+      case (callee, l) => callee -> l.map(_._2).toSet
+    }
+
+  val nexts: Map[Loc, Set[Loc]] =
+    program.methods.toList.flatMap{
+      case (method, (_, is)) =>
+        def indexOf(l: LabelNode): Int = is.indexOf(l)
+        is.zipWithIndex.map{
+          case (instr, ind) =>
+            val curr = Loc(method, ind)
+            val nextSet: Set[Loc] = instr match {
+              case Label(_) | Load(_) | Store(_) | Getstatic(_) | Getfield(_) |
+              Putfield(_) | Lconst(_) | Pop(_) | Ladd(_) | Lsub(_) | Lcmp(_) |
+              Invokevirtual("println", _) =>
+                Set(curr.next)
+
+              case Invokevirtual(m, _) => Set(Loc(m, 0))
+              case Return(_) | Lreturn(_) =>
+                if (method == "main")
+                  Set()
+                else
+                  callSites(method).map(l => l.next).toSet
+
+              case New(_) => Set(curr.next.next.next)
+
+              case Ifeq(l) =>
+                Set(curr.next, Loc(method, indexOf(l)))
+              case Ifne(l) =>
+                Set(curr.next, Loc(method, indexOf(l)))
+              case Goto(l) =>
+                Set(Loc(method, indexOf(l)))
+
+              case _ => Set()
+            }
+          curr -> nextSet
+        }
+    }.toMap
 }
