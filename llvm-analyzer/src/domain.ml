@@ -55,6 +55,19 @@ module Location = struct
   let is_alloca = function Alloca _ -> true | _ -> false
   let is_allocsite = function Allocsite _ -> true | _ -> false
 
+  module M = Map.Make(Label)
+  let label_id_map: int M.t ref = ref M.empty
+  let next_id: int ref = ref 0
+  let label_id l =
+    match M.find_opt l !label_id_map with
+    | Some i -> i
+    | None ->
+        let id = !next_id in
+        next_id := id + 1;
+        let nmap = M.add l id !label_id_map in
+        label_id_map := nmap;
+        id
+
   let rec pp fmt = function
     | Null -> F.fprintf fmt "Null"
     | Variable x -> (
@@ -70,8 +83,9 @@ module Location = struct
             F.fprintf fmt "%s(%s)" var func
     )
     | Symbol x -> F.fprintf fmt "\'%a" pp x
-    | Alloca a -> F.fprintf fmt "Alloca(%a)" Label.pp a
-    | Allocsite a -> F.fprintf fmt "Allocsite(%a)" Label.pp a
+    | Alloca a -> F.fprintf fmt "Allocsite(%d)" (label_id a)
+    | Allocsite a -> F.fprintf fmt "Allocsite(%d)" (label_id a)
+
 end
 
 module type VALUE = sig
@@ -95,9 +109,7 @@ module PowSet (Elt : SET) : POWSET_DOMAIN with type Elt.t = Elt.t = struct
   let join = union
 
   let pp fmt s =
-    F.fprintf fmt "{";
-    iter (fun e -> F.fprintf fmt "%a, " Elt.pp e) s;
-    F.fprintf fmt "}"
+    iter (fun e -> F.fprintf fmt "%a," Elt.pp e) s;
 end
 
 module Value : VALUE = struct
@@ -150,7 +162,7 @@ module Memory : MEMORY_DOMAIN = struct
   let of_loc_map m = m
 
   let pp fmt m =
-    M.iter (fun k v -> F.fprintf fmt "%a -> %a\n" Location.pp k Value.pp v) m
+    M.iter (fun k v -> F.fprintf fmt "%a->%a\n" Location.pp k Value.pp v) m
 end
 
 module Summary = struct
@@ -159,19 +171,20 @@ module Summary = struct
   let make ps rv mem = Summary (ps, rv, Memory.to_loc_map mem)
 
   let show = function
-    | true, true -> "used & freed"
-    | true, false -> "used"
-    | false, true -> "freed"
-    | false, false -> "-"
+    | true, true -> "uf"
+    | true, false -> "u"
+    | false, true -> "f"
+    | false, false -> ""
 
   let mem_pp fmt m =
-    LocMap.iter (fun k v -> F.fprintf fmt "%a -> %a\n" Location.pp k Value.pp v) m
+    LocMap.iter (fun k v -> F.fprintf fmt "%a->%a\n" Location.pp k Value.pp v) m
 
   let pp fmt = function
     | Summary (ps, rv, mem) ->
-      List.iteri (fun i p -> F.fprintf fmt "%d -> %s\n" i (show p)) ps;
-      F.fprintf fmt "%a\n" Value.pp rv;
-      F.fprintf fmt "%a" mem_pp mem
+      F.fprintf fmt "Param\n";
+      List.iter (fun p -> F.fprintf fmt "%s\n" (show p)) ps;
+      F.fprintf fmt "Return %a\n" Value.pp rv;
+      F.fprintf fmt "Memory\n%a" mem_pp mem
 end
 
 module FunctionEnv = struct
@@ -188,5 +201,5 @@ module FunctionEnv = struct
   let find = M.find
 
   let pp fmt m =
-    M.iter (fun k v -> F.fprintf fmt "[%s]\n%a\n" k Summary.pp v) m
+    M.iter (fun k v -> F.fprintf fmt "Function %s\n%a" k Summary.pp v) m
 end

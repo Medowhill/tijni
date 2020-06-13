@@ -92,13 +92,22 @@ module Make : S = struct
               let loc = Location.of_symbol (Location.of_variable p) in
               LocMap.add loc (eval a memory) m
         ) LocMap.empty in
+      let rec apply_subst l =
+        match LocMap.find_opt l subst with
+        | None -> (
+            match l with
+            | Symbol l1 ->
+                let v = apply_subst l1 in
+                Value.fold (
+                  fun l v ->
+                    l |> Location.of_symbol |> Value.of_location |> Value.join v
+                ) v Value.bottom
+            | _ -> Value.of_location l
+        )
+        | Some v2 -> v2 in
       let subst_value v =
         Value.fold (
-          fun l v1 -> Value.join v1 (
-            match LocMap.find_opt l subst with
-            | None -> Value.of_location l
-            | Some v2 -> v2
-          )
+          fun l v1 -> Value.join v1 (apply_subst l)
         ) v Value.bottom in
 
       let Summary.Summary (_, rv, mem) =

@@ -27,7 +27,7 @@ module Make : A = struct
       FEnv.find (Llvm.value_name callee) fenv in
     List.combine (Utils.call_args instr) ps
     |> List.filter (
-        fun (a, _) -> v = Semantics.eval a mem
+        fun (a, _) -> Value.order v (Semantics.eval a mem)
     )
     |> List.split
     |> snd

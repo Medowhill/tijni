@@ -1,12 +1,9 @@
 module D = Domain
 module Analysis = Analysis.Make
 
-let usage = "Usage: analyzer [file]"
-
 let main argv =
-  if Array.length argv <> 2 then (
-    prerr_endline "analyzer: You must specify one LLVM IR file";
-    prerr_endline usage;
+  if Array.length argv <> 3 then (
+    prerr_endline "Usage: analyzer [input file] [output file]";
     exit 1
   );
   let llctx = Llvm.create_context () in
@@ -27,6 +24,9 @@ let main argv =
       else
         fenv
   ) D.FunctionEnv.empty llm in
-  Format.printf "%a" D.FunctionEnv.pp fenv
+  let oc = open_out argv.(2) in
+  Format.set_formatter_out_channel oc;
+  Format.printf "%a" D.FunctionEnv.pp fenv;
+  close_out oc
 
 let _ = main Sys.argv

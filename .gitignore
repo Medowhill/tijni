@@ -20,3 +20,5 @@ target
 _build
 .merlin
 analyzer
+
+*.summary
