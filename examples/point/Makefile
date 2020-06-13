@@ -24,7 +24,7 @@ llvm: ${NAME}.c ${NAME}.h
 	rm ${NAME}.tmp.ll
 
 run:
-	java -Djava.library.path=. ${NAME}Ex
+	java -Djava.library.path=. ${NAME}
 
 clean:
 	rm *.class *.h *.o *.dylib *.ll
