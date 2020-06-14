@@ -7,7 +7,9 @@ class Ex7 {
     } else {
       obj2.set(1);
     }
-    System.out.println(obj1.get() + obj2.get());
+    long l1 = obj1.get();
+    long l2 = obj2.get();
+    System.out.println(l1 + l2);
   }
 
   long x;

@@ -322,7 +322,8 @@ case class ListStackDomain[VD <: ValDomain with Singleton](
       case (L(l1), L(l2)) =>
         if (l1.length != l2.length)
           WL((l1 ++ l2).reduce(_ | _))
-        else L(l1.indices.map(i => l1(i) | l2(i)).toList)
+        else
+          L(l1.indices.map(i => l1(i) | l2(i)).toList)
       case (L(l), WL(v)) => WL(l.foldLeft(v)(_ | _))
       case (WL(v), L(l)) => WL(l.foldLeft(v)(_ | _))
     }
@@ -332,7 +333,7 @@ case class ListStackDomain[VD <: ValDomain with Singleton](
       if (n <= l.length) l.take(n)
       else List.fill(n)(VD.bottom)
     def popN(n: Int): Elem =
-      if (n <= l.length) L(l.take(n))
+      if (n <= l.length) L(l.drop(n))
       else bottom
     def push(v: VD.Elem): Elem = L(v :: l)
   }

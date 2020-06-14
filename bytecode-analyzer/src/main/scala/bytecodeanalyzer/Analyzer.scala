@@ -30,16 +30,16 @@ class Analyzer(program: Program) {
     val wl = Set(entry)
     val table = Map(entry -> CD.bottom)
     val res = iter(wl, table)
-    res.toList.sortBy{ case (JLoc(m, i), _) => (m, i) } foreach {
-      case (l, t) => println(l); println(t); println()
-    }
-    // for ((JLoc(m, i), ctx) <- res) {
-    //   program.methods(m).instrs(i) match {
-    //     case Invokevirtual("println", _) =>
-    //       println(s"$m:$i ${ctx.stackTop(m)}")
-    //     case _ =>
-    //   }
+    // res.toList.sortBy{ case (JLoc(m, i), _) => (m, i) } foreach {
+    //   case (l, t) => println(l); println(t); println()
     // }
+    for ((JLoc(m, i), ctx) <- res) {
+      program.methods(m).instrs(i) match {
+        case Invokevirtual("println", _) =>
+          println(s"$m:$i ${ctx.stackTop(m)}")
+        case _ =>
+      }
+    }
   }
 
   @scala.annotation.tailrec
@@ -65,7 +65,6 @@ class Analyzer(program: Program) {
     }
 
   def step(loc: JLoc, ctx: AbsCtx): Set[(JLoc, AbsCtx)] = {
-    // println(loc)
     val method = loc.method
     program.methods(method).instrs(loc.pc) match {
       case Label(_) | Getstatic(_) | Return(_) | Goto(_) =>
@@ -86,7 +85,7 @@ class Analyzer(program: Program) {
       case Getfield(f) =>
         val a = ctx.stackTop(method)
         val ctx1 = ctx.stackPop(method)
-        val obj = ctx.heapGet(LD.ofLocs(a.toLocs))
+        val obj = ctx1.heapGet(LD.ofLocs(a.toLocs))
         val v = obj.get(f)
         Set(loc.next -> ctx1.stackPush(method, v, recursives))
 
