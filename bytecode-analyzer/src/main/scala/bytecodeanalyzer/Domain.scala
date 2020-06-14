@@ -110,11 +110,6 @@ object SetNumDomain extends NumDomain {
   def ofNum(l: Long) = SetOf(Set(l))
 }
 
-case class Loc(method: String, pc: Int) {
-  override def toString: String = s"$method:$pc"
-  def next: Loc = Loc(method, pc + 1)
-}
-
 trait LocDomain extends Domain {
   type Elem <: LElemImpl
 

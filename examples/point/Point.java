@@ -12,6 +12,8 @@ class Point {
     p2.setX(1);
     p2.setY(1);
 
+    System.out.println(p1.dist(p2));
+
     p1.free();
     p2.free();
   }

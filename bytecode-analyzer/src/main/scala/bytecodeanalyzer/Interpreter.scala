@@ -1,13 +1,14 @@
 package info.hjaem.bytecodeanalyzer
 
+import org.objectweb.asm.Type
 import org.objectweb.asm.tree._
 
 object Interpreter {
 
   def run(pg: Program): Unit = {
-    val (varNum, instrs) = pg.mainMethod
+    val main = pg.mainMethod
     var ctx = Ctx(
-      Frame(Vector.fill(varNum)(Undef), Nil, 0, instrs) :: Nil,
+      Frame(Vector.fill(main.maxLocals)(Undef), Nil, 0, main.instrs) :: Nil,
       Map(),
       pg
     )
@@ -172,15 +173,16 @@ object Interpreter {
         println(v)
         copy(callStack = nhead :: tail)
       } else {
-        val argNum = d.indexOf(")") - d.indexOf("(") - 1
+        val argNum = Type.getMethodType(d).getArgumentTypes.length
         val (rargs, nhead) = head.popN(argNum + 1)
         val args = rargs.reverse
-        val (varNum, instrs) = program.methods(m)
-        val vars =
-          args.tail.zipWithIndex.foldLeft(Vector.fill(varNum)(Undef: Value)){
-            case (vars, (a, i)) => vars.updated(2 * i + 1, a)
-          }.updated(0, args.head)
-        val nf = Frame(vars, Nil, -1, instrs)
+        val method = program.methods(m)
+        val initMap = method.argIndexes.zip(args)
+        val undefs = Vector.fill(method.maxLocals)(Undef: Value)
+        val vars = initMap.foldLeft(undefs){
+          case (vars, (i, a)) => vars.updated(i, a)
+        }
+        val nf = Frame(vars, Nil, -1, method.instrs)
         copy(callStack = nf :: nhead :: tail)
       }
     def ret: Ctx = copy(callStack = tail)

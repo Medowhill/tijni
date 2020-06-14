@@ -4,11 +4,11 @@ object Main {
 
   def main(args: Array[String]): Unit = args match {
     case Array(filename) =>
-      // val pg = Program(filename)
+      val pg = Program(filename)
       // println(pg)
       // Interpreter.run(pg)
-      // new Analyzer(pg).run()
-      println(Summary.fromFile(filename))
+      new Analyzer(pg).run()
+      // Summary.fromFile(filename)
 
     case _ => println("give a file name")
   }
