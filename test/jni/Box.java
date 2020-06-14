@@ -4,10 +4,9 @@ class Box {
   public static void main(String[] args) {
     Box p = new Box();
     p.malloc();
-    long ptr = p.ptr;
-    p.nativeWrite(ptr, 1);
-    p.nativeFree(ptr);
-    p.nativeRead(ptr);
+    p.write(1);
+    p.read();
+    p.free();
   }
 
   long ptr;

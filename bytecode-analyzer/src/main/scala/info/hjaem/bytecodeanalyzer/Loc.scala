@@ -24,7 +24,7 @@ case class Allocsite(id: Int) extends CLoc
 
 object CLoc extends RegexParsers with Function[String, CLoc] {
 
-  lazy val x: Parser[String] = "[0-9a-zA-Z_]+".r
+  lazy val x: Parser[String] = "[0-9a-zA-Z_.]+".r
   lazy val n: Parser[Int] = "[0-9]+".r ^^ (_.toInt)
   def wrap[T](p: => Parser[T]): Parser[T] = "(" ~> p <~ ")"
 

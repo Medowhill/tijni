@@ -98,7 +98,7 @@ class JavaSpec extends AnyFlatSpec with Matchers {
       "Ex7.class",
       List("main:38 ({0,1,2}, {}, {})")
     )
-)
+  )
 
   for ((f, results) <- analyzeTests) {
     f should "be analyzed" in {

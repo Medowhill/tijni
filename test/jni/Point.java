@@ -2,20 +2,12 @@ class Point {
   static { System.loadLibrary("Point"); }
 
   public static void main(String[] args) {
-    Point p1 = new Point();
-    p1.malloc();
-    p1.setX(1);
-    p1.setY(0);
-
-    Point p2 = new Point();
-    p2.malloc();
-    p2.setX(1);
-    p2.setY(1);
-
-    System.out.println(p1.dist(p2));
-
-    p1.free();
-    p2.free();
+    Point p = new Point();
+    p.malloc();
+    p.setX(1);
+    p.setY(0);
+    p.dist(p);
+    p.free();
   }
 
   long ptr;

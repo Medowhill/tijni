@@ -1,12 +1,13 @@
-class Box {
-  static { System.loadLibrary("Box"); }
+class BoxUaf {
+  static { System.loadLibrary("BoxUaf"); }
 
   public static void main(String[] args) {
-    Box p = new Box();
+    BoxUaf p = new BoxUaf();
     p.malloc();
-    p.write(1);
-    System.out.println(p.read());
-    p.free();
+    long ptr = p.ptr;
+    p.nativeWrite(ptr, 1);
+    p.nativeFree(ptr);
+    p.nativeRead(ptr);
   }
 
   long ptr;

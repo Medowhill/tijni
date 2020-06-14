@@ -1,11 +1,12 @@
-class Ptr {
-  static { System.loadLibrary("Ptr"); }
+class PtrDf {
+  static { System.loadLibrary("PtrDf"); }
 
   public static void main(String[] args) {
-    Ptr p = new Ptr();
+    PtrDf p = new PtrDf();
     p.malloc();
     p.free();
-    p.free();
+    long ptr = p.ptr;
+    p.nativeFree(ptr);
   }
 
   long ptr;
