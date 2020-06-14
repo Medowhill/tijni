@@ -16,4 +16,4 @@ test: $(EXAMPLE_SUMMARY_FILES)
 	diff $*.summary $*.summary.expected
 
 clean:
-	rm -f *.ll *.sumary
+	rm -f *.ll *.summary

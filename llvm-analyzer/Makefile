@@ -4,4 +4,4 @@ all:
 
 clean:
 	dune clean
-	rm analyzer
+	rm -f analyzer
