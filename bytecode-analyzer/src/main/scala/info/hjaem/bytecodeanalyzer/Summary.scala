@@ -5,7 +5,7 @@ import play.api.libs.functional.syntax._
 import scala.io.Source
 
 case class Summary(
-  functions: Map[String, FunctionSummary]
+  functions: Map[String, FunctionSummary] = Map()
 ) extends Function[String, FunctionSummary] {
 
   def apply(name: String): FunctionSummary =

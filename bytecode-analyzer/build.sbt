@@ -10,3 +10,5 @@ ThisBuild / libraryDependencies += "org.ow2.asm" % "asm-tree" % asmVersion
 ThisBuild / libraryDependencies += "org.ow2.asm" % "asm-util" % asmVersion
 ThisBuild / libraryDependencies += "com.typesafe.play" %% "play-json" % "2.9.0"
 ThisBuild / libraryDependencies += "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2"
+ThisBuild / libraryDependencies += "commons-io" % "commons-io" % "2.7"
+ThisBuild / libraryDependencies += "org.scalatest" %% "scalatest" % "3.1.1" % Test

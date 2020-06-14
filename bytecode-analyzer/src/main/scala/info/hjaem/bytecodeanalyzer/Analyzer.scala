@@ -3,7 +3,7 @@ package info.hjaem.bytecodeanalyzer
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree._
 
-class Analyzer(program: Program, summary: Summary) {
+class Analyzer(program: Program, summary: Summary = Summary()) {
 
   val ND = SetNumDomain
   val LD = SetLocDomain
@@ -36,18 +36,13 @@ class Analyzer(program: Program, summary: Summary) {
     val wl = Set(entry)
     val table = Map(entry -> CD.bottom)
     val res = iter(wl, table)
-    // res.toList.sortBy{ case (Loc(m, i), _) => (m, i) } foreach {
-    //   case (l, t) => println(l); println(t); println()
-    // }
-    for ((Loc(m, i), ctx) <- res) {
-      program.methods(m).instrs(i) match {
-        case Invokevirtual("println", _) =>
-          println(s"$m:$i ${ctx.stackTop(m)}")
-        case _ =>
-      }
-    }
-    for ((loc @ Loc(method, i), ctx) <- res) {
+
+    val sorted = res.toList.sortBy{ case (Loc(m, i), _) => (m, i) }
+
+    for ((loc @ Loc(method, i), ctx) <- sorted) {
       program.methods(method).instrs(i) match {
+        case Invokevirtual("println", _) =>
+          println(s"$loc ${ctx.stackTop(method)}")
         case Invokevirtual(m, d) => summary.get(m) match {
           case Some(fsum) =>
             val argNum = Type.getMethodType(d).getArgumentTypes.length
