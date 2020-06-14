@@ -86,6 +86,7 @@ object Lconst {
     case in: InsnNode if in.getOpcode == Opcodes.LCONST_1 =>
       Some(1)
     case in: LdcInsnNode if in.getOpcode == Opcodes.LDC =>
+      println(in.cst)
       Some(in.cst.asInstanceOf[Long])
     case _ => None
   }

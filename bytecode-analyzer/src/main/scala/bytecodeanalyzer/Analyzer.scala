@@ -3,11 +3,12 @@ package info.hjaem.bytecodeanalyzer
 import org.objectweb.asm.Type
 import org.objectweb.asm.tree._
 
-class Analyzer(program: Program) {
+class Analyzer(program: Program, summary: Summary) {
 
   val ND = SetNumDomain
   val LD = SetLocDomain
-  val VD = ProdValDomain(ND, LD)
+  val CLD = SetCLocDomain
+  val VD = ProdValDomain(ND, LD, CLD)
   object MDM extends Make[MemDomain, VD.type] {
     def apply(vd: VD.type): MemDomain[VD.type] = MapMemDomain(vd)
   }
@@ -18,22 +19,27 @@ class Analyzer(program: Program) {
     def apply(ld: LD.type, vd: VD.type): HeapDomain[LD.type, VD.type] =
       MapHeapDomain(ld, vd, ODM)
   }
+  object CHDM extends Make2C[CHeapDomain, CLD.type, VD.type] {
+    def apply(ld: CLD.type, vd: VD.type): CHeapDomain[CLD.type, VD.type] =
+      MapCHeapDomain(ld, vd)
+  }
   object SDM extends Make[StackDomain, VD.type] {
     def apply(vd: VD.type): StackDomain[VD.type] = ListStackDomain(vd)
   }
-  val CD: CtxDomain[VD.type, LD.type] = StdCtxDomain(VD, LD, MDM, HDM, SDM)
+  val CD: CtxDomain[VD.type, LD.type, CLD.type] =
+    StdCtxDomain(VD, LD, CLD, MDM, HDM, CHDM, SDM)
 
   type AbsCtx = CD.Elem
 
   def run(): Unit = {
-    val entry = JLoc("main", 1)
+    val entry = Loc("main", 1)
     val wl = Set(entry)
     val table = Map(entry -> CD.bottom)
     val res = iter(wl, table)
-    // res.toList.sortBy{ case (JLoc(m, i), _) => (m, i) } foreach {
+    // res.toList.sortBy{ case (Loc(m, i), _) => (m, i) } foreach {
     //   case (l, t) => println(l); println(t); println()
     // }
-    for ((JLoc(m, i), ctx) <- res) {
+    for ((Loc(m, i), ctx) <- res) {
       program.methods(m).instrs(i) match {
         case Invokevirtual("println", _) =>
           println(s"$m:$i ${ctx.stackTop(m)}")
@@ -44,8 +50,8 @@ class Analyzer(program: Program) {
 
   @scala.annotation.tailrec
   final def iter(
-    worklist: Set[JLoc], table: Map[JLoc, AbsCtx]
-  ): Map[JLoc, AbsCtx] =
+    worklist: Set[Loc], table: Map[Loc, AbsCtx]
+  ): Map[Loc, AbsCtx] =
     if (worklist.isEmpty)
       table
     else {
@@ -64,7 +70,7 @@ class Analyzer(program: Program) {
       iter(wl, merged)
     }
 
-  def step(loc: JLoc, ctx: AbsCtx): Set[(JLoc, AbsCtx)] = {
+  def step(loc: Loc, ctx: AbsCtx): Set[(Loc, AbsCtx)] = {
     val method = loc.method
     program.methods(method).instrs(loc.pc) match {
       case Label(_) | Getstatic(_) | Return(_) | Goto(_) =>
@@ -104,28 +110,64 @@ class Analyzer(program: Program) {
 
       case Invokevirtual(m, d) =>
         val argNum = Type.getMethodType(d).getArgumentTypes.length
-        val obj :: args = ctx.stackTopN(method, argNum + 1).reverse
+        val args = ctx.stackTopN(method, argNum + 1).reverse
         val ctx1 = ctx.stackPopN(method, argNum + 1)
-        val nctx =
-          if (recursives(m)) {
-            val ctx2 = ctx1.memWeakUpdate(m, 0, obj)
-            args.zipWithIndex.foldLeft(ctx2){
-              case (c, (a, i)) => c.memWeakUpdate(m, 2 * i + 1, a)
+        program.methods.get(m) match {
+          case Some(callee) =>
+            val indArgs = callee.argIndexes.zip(args)
+            val rec = recursives(m)
+            def update(c: AbsCtx, i: Int, a: VD.Elem) =
+              if (rec)
+                c.memWeakUpdate(m, i, a)
+              else
+                c.memStrongUpdate(m, i, a)
+            val ctx2 =
+              indArgs.foldLeft(ctx1){ case (c, (i, a)) => update(c, i, a) }
+            Set(Loc(m, 0) -> ctx2)
+          case None =>
+            val callee = program.natives(m)
+            val fsum = summary(m)
+
+            val pas = fsum.params.tail.zip(args)
+            val tctx = pas.foldLeft(ctx1){
+              case (c, (p, a)) => c.cHeapWeakUpdate(CLD.ofCLoc(p.name), a)
             }
-          } else {
-            val ctx2 = ctx1.memStrongUpdate(m, 0, obj)
-            args.zipWithIndex.foldLeft(ctx2){
-              case (c, (a, i)) => c.memStrongUpdate(m, 2 * i + 1, a)
+
+            def subst(l: CLoc): VD.Elem = l match {
+              case Symbol(l) => tctx.cHeapGet(CLD.ofCLocs(subst(l).toCLocs))
+              case _ => VD.ofCLoc(l)
             }
-          }
-          Set(JLoc(m, 0) -> nctx)
+            def need(l: CLoc): Boolean = l match {
+              case _: Allocsite => true
+              case _ => false
+            }
+            def toVal(l: CLoc): VD.Elem =
+              subst(l) |
+              (if (need(l)) VD.ofCLoc(l) else VD.bottom) |
+              VD.numTop
+
+            val ctx2 = fsum.filtered.foldLeft(ctx1){
+              case (c, (k, v)) =>
+                val locs = toVal(k).toCLocs
+                val value = v.map(toVal).foldLeft(VD.bottom)(_ | _)
+                c.cHeapWeakUpdate(CLD.ofCLocs(locs), value)
+            }
+            val ctx3 =
+              if (callee.returnVoid)
+                ctx2
+              else {
+                val retv = fsum.ret.map(toVal).foldLeft(VD.bottom)(_ | _)
+                ctx2.stackPush(method, retv, recursives)
+              }
+            Set(loc.next -> ctx3)
+        }
 
       case Lreturn(_) =>
         val v = ctx.stackTop(method)
         val ctx1 = ctx.stackPop(method)
         nexts(loc).map(
           l => {
-            val JLoc(m, _) = l
+            val Loc(m, _) = l
             l -> ctx1.stackPush(m, v, recursives)
           }
         )
@@ -200,33 +242,37 @@ class Analyzer(program: Program) {
       m => transitiveClosure(m) contains m
     )
 
-  val callSites: Map[String, Set[JLoc]] =
+  val callSites: Map[String, Set[Loc]] =
     program.methods.toList.flatMap{
       case (caller, m) =>
         m.instrs.zipWithIndex.flatMap{
           case (Invokevirtual(callee, _), i) =>
-            Some((callee, JLoc(caller, i)))
+            Some((callee, Loc(caller, i)))
           case _ => None
         }
     }.groupBy(_._1).map{
       case (callee, l) => callee -> l.map(_._2).toSet
     }
 
-  val nexts: Map[JLoc, Set[JLoc]] =
+  val nexts: Map[Loc, Set[Loc]] =
     program.methods.toList.flatMap{
       case (method, m) =>
         val is = m.instrs
         def indexOf(l: LabelNode): Int = is.indexOf(l)
         is.zipWithIndex.map{
           case (instr, ind) =>
-            val curr = JLoc(method, ind)
-            val nextSet: Set[JLoc] = instr match {
+            val curr = Loc(method, ind)
+            val nextSet: Set[Loc] = instr match {
               case Label(_) | Load(_) | Store(_) | Getstatic(_) | Getfield(_) |
               Putfield(_) | Lconst(_) | Pop(_) | Ladd(_) | Lsub(_) | Lcmp(_) |
               Invokevirtual("println", _) =>
                 Set(curr.next)
 
-              case Invokevirtual(m, _) => Set(JLoc(m, 0))
+              case Invokevirtual(m, _) =>
+                if (program.methods contains m)
+                  Set(Loc(m, 0))
+                else
+                  Set(curr.next)
               case Return(_) | Lreturn(_) =>
                 if (method == "main")
                   Set()
@@ -236,11 +282,11 @@ class Analyzer(program: Program) {
               case New(_) => Set(curr.next.next.next)
 
               case Ifeq(l) =>
-                Set(curr.next, JLoc(method, indexOf(l)))
+                Set(curr.next, Loc(method, indexOf(l)))
               case Ifne(l) =>
-                Set(curr.next, JLoc(method, indexOf(l)))
+                Set(curr.next, Loc(method, indexOf(l)))
               case Goto(l) =>
-                Set(JLoc(method, indexOf(l)))
+                Set(Loc(method, indexOf(l)))
 
               case _ => Set()
             }

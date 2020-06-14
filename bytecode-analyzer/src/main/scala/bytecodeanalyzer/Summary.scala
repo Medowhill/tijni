@@ -6,23 +6,24 @@ import scala.io.Source
 
 case class Summary(
   functions: Map[String, FunctionSummary]
-)
+) extends Function[String, FunctionSummary] {
+
+  def apply(name: String): FunctionSummary =
+    functions
+      .find{ case (n, _) => n.endsWith(name) }
+      .get
+      ._2
+}
 
 case class FunctionSummary(
   params: List[ParamSummary],
   ret: List[CLoc],
   env: Map[CLoc, List[CLoc]]
 ) {
-  println(params)
-  println(ret)
-  println(
-  env.filter{
+  val filtered: Map[CLoc, List[CLoc]] = env.filter{
     case (_: Symbol, _) | (_: Allocsite, _) => true
     case _ => false
   }
-  )
-  println()
-
 }
 
 case class ParamSummary(

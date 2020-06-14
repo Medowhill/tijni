@@ -2,14 +2,12 @@ package info.hjaem.bytecodeanalyzer
 
 import scala.util.parsing.combinator.RegexParsers
 
-sealed trait Loc
-
-case class JLoc(method: String, pc: Int) extends Loc {
+case class Loc(method: String, pc: Int) {
   override def toString: String = s"$method:$pc"
-  def next: JLoc = JLoc(method, pc + 1)
+  def next: Loc = Loc(method, pc + 1)
 }
 
-sealed trait CLoc extends Loc {
+sealed trait CLoc {
   override def toString: String = this match {
     case Null => "Null"
     case Var(n, f) => s"$n@$f"

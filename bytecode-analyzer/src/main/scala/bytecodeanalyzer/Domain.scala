@@ -12,6 +12,14 @@ trait Make2[
   def apply(ld: LD, vd: VD): F[ld.type, vd.type]
 }
 
+trait Make2C[
+  F[_ <: CLocDomain with Singleton, _ <: ValDomain with Singleton],
+  LD <: CLocDomain with Singleton,
+  VD <: ValDomain with Singleton
+] {
+  def apply(ld: LD, vd: VD): F[ld.type, vd.type]
+}
+
 trait Domain {
   type Elem <: ElemImpl
 
@@ -102,8 +110,12 @@ object SetNumDomain extends NumDomain {
         if (s.size > maxSize) Top else SetOf(s)
     }
   }
-  case object Top extends Elem
-  case class SetOf(s: Set[Long]) extends Elem
+  case object Top extends Elem {
+    override def toString: String = "T"
+  }
+  case class SetOf(s: Set[Long]) extends Elem {
+    override def toString: String = s.mkString("{", ",", "}")
+  }
 
   val top = Top
   val bottom = SetOf(Set())
@@ -126,11 +138,36 @@ object SetLocDomain extends LocDomain {
     def <=(that: Elem): Boolean = this.locs subsetOf that.locs
     def |(that: Elem): Elem = Elem(this.locs | that.locs)
     def toLocs: Set[Loc] = locs
+    override def toString: String = locs.mkString("{", ",", "}")
   }
 
   val bottom: Elem = Elem(Set())
   def ofLoc(l: Loc): Elem = Elem(Set(l))
   def ofLocs(l: IterableOnce[Loc]): Elem = Elem(l.iterator.toSet)
+}
+
+trait CLocDomain extends Domain {
+  type Elem <: CLElemImpl
+
+  trait CLElemImpl extends ElemImpl { this: Elem =>
+    def toCLocs: Set[CLoc]
+  }
+
+  def ofCLoc(l: CLoc): Elem
+  def ofCLocs(l: IterableOnce[CLoc]): Elem
+}
+
+object SetCLocDomain extends CLocDomain {
+  case class Elem(locs: Set[CLoc]) extends CLElemImpl {
+    def <=(that: Elem): Boolean = this.locs subsetOf that.locs
+    def |(that: Elem): Elem = Elem(this.locs | that.locs)
+    def toCLocs: Set[CLoc] = locs
+    override def toString: String = locs.mkString("{", ",", "}")
+  }
+
+  val bottom: Elem = Elem(Set())
+  def ofCLoc(l: CLoc): Elem = Elem(Set(l))
+  def ofCLocs(l: IterableOnce[CLoc]): Elem = Elem(l.iterator.toSet)
 }
 
 trait ValDomain extends Domain {
@@ -141,44 +178,58 @@ trait ValDomain extends Domain {
     def -(that: Elem): Elem
     def cmp(that: Elem): Elem
     def toLocs: Set[Loc]
+    def toCLocs: Set[CLoc]
   }
 
   def ofNum(l: Long): Elem
+  def numTop: Elem
   def ofLoc(l: Loc): Elem
+  def ofLocs(l: IterableOnce[Loc]): Elem
+  def ofCLoc(l: CLoc): Elem
+  def ofCLocs(l: IterableOnce[CLoc]): Elem
 }
 
 case class ProdValDomain(
   ND: NumDomain,
-  LD: LocDomain
+  LD: LocDomain,
+  CLD: CLocDomain
 ) extends ValDomain {
 
-  case class Elem(n: ND.Elem, l: LD.Elem) extends VElemImpl {
+  case class Elem(n: ND.Elem, l: LD.Elem, c: CLD.Elem) extends VElemImpl {
     def <=(that: Elem): Boolean = {
-      val Elem(tn, tl) = that
-      n <= tn && l <= tl
+      val Elem(tn, tl, tc) = that
+      n <= tn && l <= tl && c <= tc
     }
     def |(that: Elem): Elem = {
-      val Elem(tn, tl) = that
-      Elem(n | tn, l | tl)
+      val Elem(tn, tl, tc) = that
+      Elem(n | tn, l | tl, c | tc)
     }
     def +(that: Elem): Elem = {
-      val Elem(tn, _) = that
-      Elem(n + tn, LD.bottom)
+      val Elem(tn, _, _) = that
+      Elem(n + tn, LD.bottom, CLD.bottom)
     }
     def -(that: Elem): Elem = {
-      val Elem(tn, _) = that
-      Elem(n - tn, LD.bottom)
+      val Elem(tn, _, _) = that
+      Elem(n - tn, LD.bottom, CLD.bottom)
     }
     def cmp(that: Elem): Elem = {
-      val Elem(tn, _) = that
-      Elem(n cmp tn, LD.bottom)
+      val Elem(tn, _, _) = that
+      Elem(n cmp tn, LD.bottom, CLD.bottom)
     }
     def toLocs: Set[Loc] = l.toLocs
+    def toCLocs: Set[CLoc] = c.toCLocs
+    override def toString: String = s"($n, $l, $c)"
   }
 
-  val bottom = Elem(ND.bottom, LD.bottom)
-  def ofNum(l: Long): Elem = Elem(ND.ofNum(l), LD.bottom)
-  def ofLoc(l: Loc): Elem = Elem(ND.bottom, LD.ofLoc(l))
+  val bottom = Elem(ND.bottom, LD.bottom, CLD.bottom)
+  def ofNum(l: Long): Elem = Elem(ND.ofNum(l), LD.bottom, CLD.bottom)
+  def numTop: Elem = Elem(ND.top, LD.bottom, CLD.bottom)
+  def ofLoc(l: Loc): Elem = Elem(ND.bottom, LD.ofLoc(l), CLD.bottom)
+  def ofLocs(ls: IterableOnce[Loc]): Elem =
+    Elem(ND.bottom, LD.ofLocs(ls), CLD.bottom)
+  def ofCLoc(l: CLoc): Elem = Elem(ND.bottom, LD.bottom, CLD.ofCLoc(l))
+  def ofCLocs(ls: IterableOnce[CLoc]): Elem =
+    Elem(ND.bottom, LD.bottom, CLD.ofCLocs(ls))
 }
 
 abstract class MemDomain[VD <: ValDomain with Singleton](
@@ -288,6 +339,46 @@ case class MapHeapDomain[
   def bottom = Elem(Map())
 }
 
+abstract class CHeapDomain[
+  CLD <: CLocDomain with Singleton,
+  VD <: ValDomain with Singleton,
+](
+  val CLD: CLD, val VD: VD
+) extends Domain {
+  type Elem <: CHElemImpl
+
+  trait CHElemImpl extends ElemImpl { this: Elem =>
+    def get(l: CLD.Elem): VD.Elem
+    def weakUpdate(l: CLD.Elem, v: VD.Elem): Elem
+  }
+}
+
+case class MapCHeapDomain[
+  CLD <: CLocDomain with Singleton,
+  VD <: ValDomain with Singleton,
+](
+  cld: CLD, vd: VD
+) extends CHeapDomain[CLD, VD](cld, vd) {
+
+  case class Elem(m: Map[CLoc, VD.Elem]) extends CHElemImpl {
+    def <=(that: Elem): Boolean =
+      m.forall{ case (l, v) => v <= that.get(l) }
+    def |(that: Elem): Elem =
+      Elem((m.keySet ++ that.m.keySet).map(
+        l => l -> (this.get(l) | that.get(l))
+      ).toMap)
+    def get(l: CLoc): VD.Elem = m.getOrElse(l, VD.bottom)
+    def get(l: CLD.Elem): VD.Elem =
+      l.toCLocs.foldLeft(VD.bottom){ case (v, l) => v | get(l) }
+    def weakUpdate(l: CLD.Elem, v: VD.Elem): Elem =
+      Elem(l.toCLocs.foldLeft(m){
+        case (m, l) => m + (l -> (v | get(l)))
+      }.toMap)
+  }
+
+  def bottom = Elem(Map())
+}
+
 abstract class StackDomain[VD <: ValDomain with Singleton](
   val VD: VD
 ) extends Domain {
@@ -350,16 +441,19 @@ case class ListStackDomain[VD <: ValDomain with Singleton](
 abstract class CtxDomain[
   VD <: ValDomain with Singleton,
   LD <: LocDomain with Singleton,
+  CLD <: CLocDomain with Singleton
 ](
-  val VD: VD, val LD: LD,
+  val VD: VD, val LD: LD, val CLD: CLD,
   val MDM: Make[MemDomain, VD],
   val HDM: Make2[HeapDomain, LD, VD],
+  val CHDM: Make2C[CHeapDomain, CLD, VD],
   val SDM: Make[StackDomain, VD]
 ) extends Domain {
   type Elem <: CElemImpl
 
-  val MD: MemDomain[VD.type] = MDM(VD)
+  val MD = MDM(VD)
   val HD = HDM(LD, VD)
+  val CHD = CHDM(CLD, VD)
   val SD = SDM(VD)
 
   trait CElemImpl extends ElemImpl { this: Elem =>
@@ -369,6 +463,9 @@ abstract class CtxDomain[
 
     def heapGet(l: LD.Elem): HD.OD.Elem
     def heapWeakUpdate(l: LD.Elem, v: HD.OD.Elem): Elem
+
+    def cHeapGet(l: CLD.Elem): CHD.VD.Elem
+    def cHeapWeakUpdate(l: CLD.Elem, v: CHD.VD.Elem): Elem
 
     def stackTop(m: String): VD.Elem = stackTopN(m, 1).head
     def stackTopN(m: String, n: Int): List[VD.Elem]
@@ -381,30 +478,35 @@ abstract class CtxDomain[
 case class StdCtxDomain[
   VD <: ValDomain with Singleton,
   LD <: LocDomain with Singleton,
+  CLD <: CLocDomain with Singleton,
 ](
-  vd: VD, ld: LD,
+  vd: VD, ld: LD, cld: CLD,
   mdm: Make[MemDomain, VD],
   hdm: Make2[HeapDomain, LD, VD],
+  chdm: Make2C[CHeapDomain, CLD, VD],
   sdm: Make[StackDomain, VD]
-) extends CtxDomain[VD, LD](vd, ld, mdm, hdm, sdm) {
+) extends CtxDomain[VD, LD, CLD](vd, ld, cld, mdm, hdm, chdm, sdm) {
 
   case class Elem(
     mems: Map[String, MD.Elem],
     heap: HD.Elem,
+    cheap: CHD.Elem,
     stacks: Map[String, SD.Elem],
   ) extends CElemImpl {
     def <=(that: Elem): Boolean = (this, that) match {
-      case (Elem(m1, h1, s1), Elem(m2, h2, s2)) =>
+      case (Elem(m1, h1, c1, s1), Elem(m2, h2, c2, s2)) =>
         m1.forall{ case (m, mem) => mem <= m2.getOrElse(m, MD.bottom) } &&
         h1 <= h2 &&
+        c1 <= c2 &&
         s1.forall{ case (m, stk) => stk <= s2.getOrElse(m, SD.bottom) }
     }
     def |(that: Elem): Elem = (this, that) match {
-      case (Elem(m1, h1, s1), Elem(m2, h2, s2)) => Elem(
+      case (Elem(m1, h1, c1, s1), Elem(m2, h2, c2, s2)) => Elem(
         (m1.keys ++ m2.keys).map{
           case m => m -> List(m1, m2).flatMap(_.get(m)).reduce(_ | _)
         }.toMap,
         h1 | h2,
+        c1 | c2,
         (s1.keys ++ s2.keys).map{
           case m => m -> List(s1, s2).flatMap(_.get(m)).reduce(_ | _)
         }.toMap
@@ -425,6 +527,10 @@ case class StdCtxDomain[
     def heapGet(l: LD.Elem): HD.OD.Elem = heap.get(l)
     def heapWeakUpdate(l: LD.Elem, v: HD.OD.Elem): Elem =
       copy(heap = heap.weakUpdate(l, v))
+
+    def cHeapGet(l: CLD.Elem): CHD.VD.Elem = cheap.get(l)
+    def cHeapWeakUpdate(l: CLD.Elem, v: CHD.VD.Elem): Elem =
+      copy(cheap = cheap.weakUpdate(l, v))
 
     def stackTopN(m: String, n: Int): List[VD.Elem] =
       stacks(m).topN(n)
@@ -450,9 +556,9 @@ case class StdCtxDomain[
       val s = stacks.toList.sortBy(_._1)
         .map{ case (n, s) => s"  $n: $s" }
         .mkString("\n")
-      s"[Memory]\n$m\n[Heap]\n$heap\n[Stack]\n$s"
+      s"[Memory]\n$m\n[Heap]\n$heap\n[C Heap]\n$cheap\n[Stack]\n$s"
     }
   }
 
-  val bottom: Elem = Elem(Map(), HD.bottom, Map())
+  val bottom: Elem = Elem(Map(), HD.bottom, CHD.bottom, Map())
 }

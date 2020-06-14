@@ -48,7 +48,7 @@ class Method(mn: MethodNode) {
 
   override lazy val toString: String =
     if (isNative)
-      s"[native] $name $desc"
+      s"$name $desc"
     else {
       val is = instrs.zipWithIndex.map{
         case (i, ind) => s"  $ind: ${Program.insnToString(i)}"
@@ -68,7 +68,7 @@ object Program {
       cn.methods
         .asScala
         .map(new Method(_))
-        .filter(_.name != "<init>")
+        .filter(m => m.name != "<init>" && m.name != "<clinit>")
         .partition(_.isNative)
     in.close()
     new Program(
