@@ -1,0 +1,22 @@
+{
+  "f": {
+    "params": [ { "name": "%p(f)", "used": true, "freed": false }, { "name": "%x(f)", "used": false, "freed": false } ],
+    "ret": [],
+    "env": {
+      "%p(f)": [ "'%p(f)" ],
+      "%x(f)": [ "'%x(f)" ],
+      "'%p(f)": [ "'%x(f)" ]
+    }
+  },
+  "g": {
+    "params": [ { "name": "%p(g)", "used": true, "freed": false }, { "name": "%x(g)", "used": false, "freed": false } ],
+    "ret": [],
+    "env": {
+      "%p(f)": [ "'%p(g)" ],
+      "%x(f)": [ "'%x(g)" ],
+      "%p(g)": [ "'%p(g)" ],
+      "%x(g)": [ "'%x(g)" ],
+      "'%p(g)": [ "'%x(g)" ]
+    }
+  }
+}

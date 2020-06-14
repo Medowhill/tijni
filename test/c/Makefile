@@ -1,5 +1,6 @@
 EXAMPLE_C_FILES = $(shell find . -type f -name '*.c')
 EXAMPLE_LL_FILES = $(patsubst %.c, %.ll, $(EXAMPLE_C_FILES))
+EXAMPLE_SUMMARY_FILES = $(patsubst %.ll, %.summary, $(EXAMPLE_LL_FILES))
 
 all: $(EXAMPLE_LL_FILES)
 
@@ -8,5 +9,11 @@ all: $(EXAMPLE_LL_FILES)
 	opt -mem2reg -S -o $*.ll $*.tmp.ll
 	rm -f $*.tmp.ll
 
+test: $(EXAMPLE_SUMMARY_FILES)
+
+%.summary: %.ll
+	../../llvm-analyzer/analyzer $*.ll $*.summary
+	diff $*.summary $*.summary.expected
+
 clean:
-	rm -f *.ll
+	rm -f *.ll *.sumary

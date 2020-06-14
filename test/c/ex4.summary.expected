@@ -1,0 +1,13 @@
+{
+  "f": {
+    "params": [ { "name": "%x(f)", "used": false, "freed": false } ],
+    "ret": [ "Allocsite(0)" ],
+    "env": {
+      "%x(f)": [ "'%x(f)" ],
+      "%call(f)": [ "Allocsite(0)" ],
+      "%0(f)": [ "Allocsite(0)" ],
+      "%1(f)": [ "Allocsite(0)" ],
+      "Allocsite(0)": [ "'%x(f)" ]
+    }
+  }
+}

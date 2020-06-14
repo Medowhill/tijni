@@ -1,0 +1,7 @@
+{
+  "f": {
+    "params": [],
+    "ret": [ "Allocsite(0)" ],
+    "env": { "%x(f)": [ "Allocsite(0)" ] }
+  }
+}

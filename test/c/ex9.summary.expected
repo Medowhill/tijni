@@ -1,0 +1,29 @@
+{
+  "f": {
+    "params": [ { "name": "%p(f)", "used": true, "freed": false }, { "name": "%x(f)", "used": false, "freed": false } ],
+    "ret": [ "Allocsite(0)" ],
+    "env": {
+      "%p(f)": [ "'%p(f)" ],
+      "%x(f)": [ "'%x(f)" ],
+      "%call(f)": [ "Allocsite(0)" ],
+      "%0(f)": [ "Allocsite(0)" ],
+      "'%p(f)": [ "'%x(f)" ]
+    }
+  },
+  "g": {
+    "params": [ { "name": "%p(g)", "used": true, "freed": false }, { "name": "%x(g)", "used": false, "freed": false } ],
+    "ret": [],
+    "env": {
+      "%p(f)": [ "'%p(g)" ],
+      "%x(f)": [ "'%x(g)" ],
+      "%call(f)": [ "Allocsite(0)" ],
+      "%0(f)": [ "Allocsite(0)" ],
+      "%p(g)": [ "'%p(g)" ],
+      "%x(g)": [ "'%x(g)" ],
+      "%call(g)": [ "Allocsite(0)" ],
+      "%0(g)": [ "Allocsite(0)" ],
+      "'%p(g)": [ "'%x(g)" ],
+      "Allocsite(0)": [ "'%x(g)" ]
+    }
+  }
+}

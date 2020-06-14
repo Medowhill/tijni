@@ -1,0 +1,17 @@
+{
+  "f": {
+    "params": [ { "name": "%x(f)", "used": false, "freed": false }, { "name": "%y(f)", "used": false, "freed": false }, { "name": "%p(f)", "used": false, "freed": false } ],
+    "ret": [ "'%p(f)", "Allocsite(0)" ],
+    "env": {
+      "%x(f)": [ "'%x(f)" ],
+      "%y(f)": [ "'%y(f)" ],
+      "%p(f)": [ "'%p(f)" ],
+      "%tobool(f)": [],
+      "%0(f)": [ "'%p(f)" ],
+      "%retval.0(f)": [ "'%p(f)", "Allocsite(0)" ],
+      "%tobool1(f)": [],
+      "%call(f)": [ "Allocsite(0)" ],
+      "%1(f)": [ "Allocsite(0)" ]
+    }
+  }
+}

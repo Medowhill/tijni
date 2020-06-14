@@ -1,0 +1,12 @@
+{
+  "f": {
+    "params": [ { "name": "%ptr(f)", "used": true, "freed": false }, { "name": "%x(f)", "used": false, "freed": false } ],
+    "ret": [],
+    "env": {
+      "%ptr(f)": [ "'%ptr(f)" ],
+      "%x(f)": [ "'%x(f)" ],
+      "%0(f)": [ "'%ptr(f)" ],
+      "'%ptr(f)": [ "'%x(f)" ]
+    }
+  }
+}

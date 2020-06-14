@@ -1,0 +1,28 @@
+{
+  "f": {
+    "params": [ { "name": "%p(f)", "used": true, "freed": false } ],
+    "ret": [],
+    "env": { "%p(f)": [ "'%p(f)" ] }
+  },
+  "g": {
+    "params": [ { "name": "%p(g)", "used": false, "freed": true } ],
+    "ret": [],
+    "env": {
+      "%p(g)": [ "'%p(g)" ],
+      "%0(g)": [ "'%p(g)" ]
+    }
+  },
+  "h": {
+    "params": [ { "name": "%p(h)", "used": true, "freed": true }, { "name": "%q(h)", "used": true, "freed": true }, { "name": "%x(h)", "used": false, "freed": false } ],
+    "ret": [],
+    "env": {
+      "%p(f)": [ "'%p(h)", "'%q(h)" ],
+      "%p(g)": [ "'%p(h)", "'%q(h)" ],
+      "%0(g)": [ "'%p(h)", "'%q(h)" ],
+      "%p(h)": [ "'%p(h)" ],
+      "%q(h)": [ "'%q(h)" ],
+      "%x(h)": [ "'%x(h)" ],
+      "%tobool(h)": []
+    }
+  }
+}

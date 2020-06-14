@@ -1,0 +1,10 @@
+{
+  "f": {
+    "params": [ { "name": "%p(f)", "used": false, "freed": true } ],
+    "ret": [],
+    "env": {
+      "%p(f)": [ "'%p(f)" ],
+      "%0(f)": [ "'%p(f)" ]
+    }
+  }
+}
