@@ -9,10 +9,12 @@ case class Summary(
 ) extends Function[String, FunctionSummary] {
 
   def apply(name: String): FunctionSummary =
+    get(name).get
+
+  def get(name: String): Option[FunctionSummary] =
     functions
       .find{ case (n, _) => n.endsWith(name) }
-      .get
-      ._2
+      .map(_._2)
 }
 
 case class FunctionSummary(

@@ -46,6 +46,25 @@ class Analyzer(program: Program, summary: Summary) {
         case _ =>
       }
     }
+    for ((loc @ Loc(method, i), ctx) <- res) {
+      program.methods(method).instrs(i) match {
+        case Invokevirtual(m, d) => summary.get(m) match {
+          case Some(fsum) =>
+            val argNum = Type.getMethodType(d).getArgumentTypes.length
+            val args = ctx.stackTopN(method, argNum + 1).reverse
+            val pas = fsum.params.tail.zip(args)
+            pas.foreach{
+              case (p, a) =>
+                if (p.freed && ctx.cHeapIsFreed(CLD.ofCLocs(a.toCLocs)))
+                  println(s"$loc $a (double-free)")
+                if (p.used && ctx.cHeapIsFreed(CLD.ofCLocs(a.toCLocs)))
+                  println(s"$loc $a (use-after-free)")
+            }
+          case _ =>
+        }
+        case _ =>
+      }
+    }
   }
 
   @scala.annotation.tailrec
@@ -146,20 +165,27 @@ class Analyzer(program: Program, summary: Summary) {
               (if (need(l)) VD.ofCLoc(l) else VD.bottom) |
               VD.numTop
 
-            val ctx2 = fsum.filtered.foldLeft(ctx1){
+            val ctx2 = pas.foldLeft(ctx1){
+              case (c, (p, a)) =>
+                if (p.freed)
+                  c.cHeapFree(CLD.ofCLocs(a.toCLocs))
+                else
+                  c
+            }
+            val ctx3 = fsum.filtered.foldLeft(ctx2){
               case (c, (k, v)) =>
                 val locs = toVal(k).toCLocs
                 val value = v.map(toVal).foldLeft(VD.bottom)(_ | _)
                 c.cHeapWeakUpdate(CLD.ofCLocs(locs), value)
             }
-            val ctx3 =
+            val ctx4 =
               if (callee.returnVoid)
-                ctx2
+                ctx3
               else {
                 val retv = fsum.ret.map(toVal).foldLeft(VD.bottom)(_ | _)
-                ctx2.stackPush(method, retv, recursives)
+                ctx3.stackPush(method, retv, recursives)
               }
-            Set(loc.next -> ctx3)
+            Set(loc.next -> ctx4)
         }
 
       case Lreturn(_) =>
@@ -277,7 +303,7 @@ class Analyzer(program: Program, summary: Summary) {
                 if (method == "main")
                   Set()
                 else
-                  callSites(method).map(l => l.next).toSet
+                  callSites.getOrElse(method, Set()).map(l => l.next).toSet
 
               case New(_) => Set(curr.next.next.next)
 

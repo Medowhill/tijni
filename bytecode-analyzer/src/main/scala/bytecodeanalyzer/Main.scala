@@ -6,7 +6,7 @@ object Main {
     case Array(filename1, filename2) =>
       val pg = Program(filename1)
       val summary = Summary.fromFile(filename2)
-      println(pg)
+      // println(pg)
       // Interpreter.run(pg)
       new Analyzer(pg, summary).run()
 

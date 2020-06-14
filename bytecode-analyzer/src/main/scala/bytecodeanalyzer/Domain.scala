@@ -257,6 +257,9 @@ case class MapMemDomain[VD <: ValDomain with Singleton](
     def get(i: Int): VD.Elem = m.getOrElse(i, VD.bottom)
     def strongUpdate(i: Int, v: VD.Elem): Elem = Elem(m + (i -> v))
     def weakUpdate(i: Int, v: VD.Elem): Elem = Elem(m + (i -> (v | get(i))))
+
+    override def toString: String =
+      m.map{ case (k, v) => s"$k -> $v" }.mkString(", ")
   }
 
   val bottom = Elem(Map())
@@ -290,6 +293,8 @@ case class MapObjDomain[VD <: ValDomain with Singleton](
     def get(f: String): VD.Elem = m.getOrElse(f, VD.bottom)
     def strongUpdate(f: String, v: VD.Elem): Elem = Elem(m + (f -> v))
     def weakUpdate(f: String, v: VD.Elem): Elem = Elem(m + (f -> (v | get(f))))
+    override def toString: String =
+      m.map{ case (k, v) => s"$k = $v" }.mkString("{ ", ", ", " }")
   }
 
   def bottom: Elem = Elem(Map())
@@ -334,6 +339,8 @@ case class MapHeapDomain[
       Elem(l.toLocs.foldLeft(m){
         case (m, l) => m + (l -> (v | get(l)))
       }.toMap)
+    override def toString: String =
+      m.map{ case (k, v) => s"$k -> $v" }.mkString(", ")
   }
 
   def bottom = Elem(Map())
@@ -349,7 +356,9 @@ abstract class CHeapDomain[
 
   trait CHElemImpl extends ElemImpl { this: Elem =>
     def get(l: CLD.Elem): VD.Elem
+    def isFreed(l: CLD.Elem): Boolean
     def weakUpdate(l: CLD.Elem, v: VD.Elem): Elem
+    def free(l: CLD.Elem): Elem
   }
 }
 
@@ -360,23 +369,37 @@ case class MapCHeapDomain[
   cld: CLD, vd: VD
 ) extends CHeapDomain[CLD, VD](cld, vd) {
 
-  case class Elem(m: Map[CLoc, VD.Elem]) extends CHElemImpl {
+  case class Elem(m: Map[CLoc, VD.Elem], s: Set[CLoc]) extends CHElemImpl {
     def <=(that: Elem): Boolean =
-      m.forall{ case (l, v) => v <= that.get(l) }
+      m.forall{ case (l, v) => v <= that.get(l) } &&
+      (this.s subsetOf that.s)
     def |(that: Elem): Elem =
-      Elem((m.keySet ++ that.m.keySet).map(
-        l => l -> (this.get(l) | that.get(l))
-      ).toMap)
+      Elem(
+        (m.keySet ++ that.m.keySet).map(
+          l => l -> (this.get(l) | that.get(l))
+        ).toMap,
+        this.s | that.s
+      )
     def get(l: CLoc): VD.Elem = m.getOrElse(l, VD.bottom)
     def get(l: CLD.Elem): VD.Elem =
       l.toCLocs.foldLeft(VD.bottom){ case (v, l) => v | get(l) }
+    def isFreed(l: CLD.Elem): Boolean =
+      l.toCLocs.exists(s)
     def weakUpdate(l: CLD.Elem, v: VD.Elem): Elem =
-      Elem(l.toCLocs.foldLeft(m){
-        case (m, l) => m + (l -> (v | get(l)))
-      }.toMap)
+      copy(m =
+        l.toCLocs.foldLeft(m){
+          case (m, l) => m + (l -> (v | get(l)))
+        }.toMap
+      )
+    def free(l: CLD.Elem): Elem =
+      copy(s = s | l.toCLocs)
+    override def toString: String =
+      m.map{ case (k, v) => s"$k -> $v" }.mkString("[", ", ", "]") +
+        ", " +
+        s.mkString("[", ", ", "]")
   }
 
-  def bottom = Elem(Map())
+  def bottom = Elem(Map(), Set())
 }
 
 abstract class StackDomain[VD <: ValDomain with Singleton](
@@ -427,11 +450,13 @@ case class ListStackDomain[VD <: ValDomain with Singleton](
       if (n <= l.length) L(l.drop(n))
       else bottom
     def push(v: VD.Elem): Elem = L(v :: l)
+    override def toString: String = l.mkString("L[", ", ", "]")
   }
   case class WL(v: VD.Elem) extends Elem {
     def topN(n: Int): List[VD.Elem] = List.fill(n)(v)
     def popN(n: Int): Elem = this
     def push(v1: VD.Elem): Elem = WL(v | v1)
+    override def toString: String = s"WL[ $v ]"
   }
 
   val bottom: Elem = L(Nil)
@@ -465,7 +490,9 @@ abstract class CtxDomain[
     def heapWeakUpdate(l: LD.Elem, v: HD.OD.Elem): Elem
 
     def cHeapGet(l: CLD.Elem): CHD.VD.Elem
+    def cHeapIsFreed(l: CLD.Elem): Boolean
     def cHeapWeakUpdate(l: CLD.Elem, v: CHD.VD.Elem): Elem
+    def cHeapFree(l: CLD.Elem): Elem
 
     def stackTop(m: String): VD.Elem = stackTopN(m, 1).head
     def stackTopN(m: String, n: Int): List[VD.Elem]
@@ -529,8 +556,10 @@ case class StdCtxDomain[
       copy(heap = heap.weakUpdate(l, v))
 
     def cHeapGet(l: CLD.Elem): CHD.VD.Elem = cheap.get(l)
+    def cHeapIsFreed(l: CLD.Elem): Boolean = cheap.isFreed(l)
     def cHeapWeakUpdate(l: CLD.Elem, v: CHD.VD.Elem): Elem =
       copy(cheap = cheap.weakUpdate(l, v))
+    def cHeapFree(l: CLD.Elem): Elem = copy(cheap = cheap.free(l))
 
     def stackTopN(m: String, n: Int): List[VD.Elem] =
       stacks(m).topN(n)
