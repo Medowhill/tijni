@@ -47,7 +47,7 @@ opt -mem2reg -S -o [file].ll [file].tmp.ll
 ```bash
 cd bytecode-analyzer
 javac [file].java
-sbt run --java-analyze [file].class
+sbt "run --java-analyze [file].class"
 ```
 
 ### JNI Analyzer
@@ -61,8 +61,9 @@ clang -c \
 	-I//Library/Java/JavaVirtualMachines/jdk-11.0.6.jdk/Contents/Home/include/darwin \
 	-emit-llvm -S -fno-discard-value-names -Xclang -disable-O0-optnone -g \
 	-o [file].tmp.ll \
-	[file].c && \
-opt -mem2reg -S -o [file].ll [file].tmp.ll && \
+	[file].c
+opt -mem2reg -S -o [file].ll [file].tmp.ll
 ../llvm-analyzer/analyzer [file].ll [file].summary
-sbt run --jni-analyze [file].class [file].summary
+sbt "run --jni-analyze [file].class [file].summary"
+# If multiple main classes are detected, select info.hjaem.bytecodeanalyzer.Main
 ```
